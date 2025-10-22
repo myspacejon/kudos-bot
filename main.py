@@ -6,6 +6,7 @@ import discord
 from discord.ext import tasks, commands
 import database
 
+
 def load_config():
     """Loads the configuration from config.json."""
     with open('config.json', 'r') as f:
@@ -22,6 +23,7 @@ def save_config(data):
 
 config = load_config()
 
+
 intents = discord.Intents.default()
 intents.reactions = True
 intents.guilds = True
@@ -31,6 +33,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 bot.setup_done = False
+
 
 def get_next_month():
     """Calculates the datetime for the start of the next month.
@@ -149,53 +152,30 @@ async def _sync_roles_helper(guild: discord.Guild):
     
     print("Role synchronization complete.")
 
+
 @bot.event
 async def on_ready():
+    """Handles bot startup, initial setup, and task launching. 
+    
+    This event is triggered once the bot is logged in and ready. It ensures that
+    database setup, role synchronization, and background tasks are started correctly.
+    """
     await bot.wait_until_ready()
-    if bot.setup_done:
-        print(f"Bot reconnected as {bot.user}")
-        return
-
-    print(f'Logged in as {bot.user}')
-
-    print("--- Attempting to restore database from backup ---")
-    backup_channel_id = config.get("BACKUP_CHANNEL_ID")
-    if backup_channel_id:
-        channel = bot.get_channel(int(backup_channel_id))
-        if channel:
-            found_backup = False
-            async for message in channel.history(limit=100):
-                if message.author.id == bot.user.id and len(message.attachments) > 0:
-                    attachment = message.attachments[0]
-                    if attachment.filename == "kudos_bot.db":
-                        print(f"Found latest backup from {message.created_at.strftime('%Y-%m-%d %H:%M')}")
-                        await attachment.save(database.DB_FILE)
-                        print("Database restored successfully.")
-                        found_backup = True
-                        break # Stop after finding the most recent one
-            if not found_backup:
-                print("No backup found in the channel.")
+    if not bot.setup_done:
+        print(f'Logged in as {bot.user}')
+        database.setup_database()
+        guild = bot.get_guild(int(config['GUILD_ID']))
+        if guild:
+            await _sync_roles_helper(guild)
         else:
-            print(f"ERROR: Could not find backup channel with ID {backup_channel_id}.")
+            print("ERROR: Could not find server. Role sync skipped.")
+        
+        update_leaderboard_loop.start()
+        daily_maintenance_loop.start()
+        monthly_reset_loop.start()
+        bot.setup_done = True
     else:
-        print("No backup channel ID configured. Skipping restore.")
-    
-    # Now that the DB is restored (or not), we can safely set it up.
-    # This will create a new DB if one wasn't restored.
-    database.setup_database()
-
-    guild = bot.get_guild(int(config['GUILD_ID']))
-    if guild:
-        await _sync_roles_helper(guild)
-    else:
-        print("ERROR: Could not find server. Role sync skipped.")
-
-    # Start all background loops
-    update_leaderboard_loop.start()
-    daily_maintenance_loop.start()
-    monthly_reset_loop.start()
-    
-    bot.setup_done = True
+        print(f"Bot reconnected as {bot.user}")
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -285,7 +265,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     database.remove_kudos(creator.id, reactor.id)
     print(f"Removed kudos: {reactor.display_name} -> {creator.display_name}")
 
-# --- COMMANDS ---
 
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
@@ -337,7 +316,6 @@ async def test_embed(ctx: commands.Context):
     else:
         await ctx.send(f"Could not find an emoji named `{config['KUDOS_EMOJI']}`.")
 
-# --- BACKGROUND TASKS ---
 
 @tasks.loop(seconds=30)
 async def update_leaderboard_loop():
@@ -408,34 +386,6 @@ async def monthly_reset_loop():
                 print(f"An error occurred during monthly reset announcement: {e}")
 
         await update_leaderboard_message()
-
-@bot.command()
-@commands.has_role(int(config['ADMIN_ROLE_ID']))
-async def exportdb(ctx):
-    """Uploads the database file to the backup channel."""
-    await ctx.message.delete() # Clean up command
-    
-    backup_channel_id = config.get("BACKUP_CHANNEL_ID")
-    if not backup_channel_id:
-        return await ctx.send("Backup channel is not configured.", delete_after=10)
-        
-    channel = bot.get_channel(int(backup_channel_id))
-    if not channel:
-        return await ctx.send("Could not find the configured backup channel.", delete_after=10)
-
-    if not os.path.exists(database.DB_FILE):
-        return await ctx.send("Database file not found. Nothing to export.", delete_after=10)
-
-    try:
-        await channel.send(
-            f"Manual database backup initiated by {ctx.author.name}.",
-            file=discord.File(database.DB_FILE)
-        )
-        await ctx.send(f"Database successfully exported to {channel.mention}.", delete_after=10)
-    except discord.Forbidden:
-        await ctx.send("Error: I don't have permission to upload files in the backup channel.", delete_after=15)
-    except Exception as e:
-        await ctx.send(f"An unexpected error occurred: {e}", delete_after=15)
 
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
