@@ -15,20 +15,25 @@ def get_db_connection():
     return conn
 
 def setup_database():
-    """Sets up the database by creating the 'users' table if it doesn't exist."""
-    if os.path.exists(DB_FILE):
-        return
-    
+    """Sets up the database by creating tables if they don't exist."""
     conn = get_db_connection()
-    conn.execute('''
-        CREATE TABLE users (
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             monthly_kudos INTEGER DEFAULT 0,
             lifetime_level INTEGER DEFAULT 1,
             daily_awards_given INTEGER DEFAULT 0,
             last_award_date TEXT
         )
-    ''')
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kudos_log (
+            message_id INTEGER,
+            reactor_id INTEGER,
+            creator_id INTEGER,
+            PRIMARY KEY (message_id, reactor_id)
+        )
+    """)
     conn.commit()
     conn.close()
     print("Database setup complete.")
@@ -93,7 +98,7 @@ def get_leaderboard_data():
         list[sqlite3.Row]: A list of user data.
     """
     conn = get_db_connection()
-    users = conn.execute('SELECT * FROM users WHERE monthly_kudos > 0 ORDER BY monthly_kudos DESC').fetchall()
+    users = conn.execute('SELECT * FROM users WHERE monthly_kudos >= 0 ORDER BY monthly_kudos DESC').fetchall()
     conn.close()
     return users
 
@@ -121,7 +126,7 @@ def apply_daily_maintenance(decay: int, bonus: int):
     return None
 
 def monthly_reset():
-    """Resets monthly kudos for all users and promotes the winner to the next lifetime level.
+    """Resets monthly kudos for all users, promotes the winner, and clears the kudos log.
 
     Returns:
         sqlite3.Row | None: The data of the winning user, or None if no users had kudos.
@@ -134,6 +139,7 @@ def monthly_reset():
         conn.execute('UPDATE users SET lifetime_level = ? WHERE user_id = ?', (new_level, winner['user_id']))
     
     conn.execute('UPDATE users SET monthly_kudos = 0')
+    conn.execute('DELETE FROM kudos_log') # Enforces the "Immutable Past"
     conn.commit()
     conn.close()
     
@@ -142,19 +148,72 @@ def monthly_reset():
 def remove_kudos(creator_id, reactor_id):
     """Removes kudos from a message creator and the user who reacted.
 
+    This function is the inverse of award_kudos. Per the Fire-and-Forget principle,
+    it does NOT refund the daily award credit.
+
     Args:
         creator_id (int): The ID of the user who created the message.
         reactor_id (int): The ID of the user who removed the reaction.
     """
     conn = get_db_connection()
-
+    # Reverse the +2 kudos for the creator
     conn.execute(
-        'UPDATE users SET monthly_kudos = monthly_kudos - 2 WHERE user_id = ?', 
+        'UPDATE users SET monthly_kudos = monthly_kudos - 2 WHERE user_id = ? AND monthly_kudos >= 2', 
         (creator_id,)
     )
+    # Reverse the +1 kudos for the reactor. The daily award is NOT refunded.
     conn.execute(
-        'UPDATE users SET monthly_kudos = monthly_kudos - 1 WHERE user_id = ?',
+        'UPDATE users SET monthly_kudos = monthly_kudos - 1 WHERE user_id = ? AND monthly_kudos >= 1',
         (reactor_id,)
+    )
+    conn.commit()
+    conn.close()
+
+def log_kudos(message_id, reactor_id, creator_id):
+    """Logs a kudos transaction in the database.
+
+    Args:
+        message_id (int): The ID of the message that was reacted to.
+        reactor_id (int): The ID of the user who gave the kudos.
+        creator_id (int): The ID of the user who received the kudos.
+    """
+    conn = get_db_connection()
+    conn.execute(
+        'INSERT OR IGNORE INTO kudos_log (message_id, reactor_id, creator_id) VALUES (?, ?, ?)',
+        (message_id, reactor_id, creator_id)
+    )
+    conn.commit()
+    conn.close()
+
+def check_kudos_exists(message_id, reactor_id):
+    """Checks if a specific kudos transaction exists in the log.
+
+    Args:
+        message_id (int): The ID of the message.
+        reactor_id (int): The ID of the user who reacted.
+
+    Returns:
+        bool: True if the kudos exists, False otherwise.
+    """
+    conn = get_db_connection()
+    log = conn.execute(
+        'SELECT 1 FROM kudos_log WHERE message_id = ? AND reactor_id = ?',
+        (message_id, reactor_id)
+    ).fetchone()
+    conn.close()
+    return log is not None
+
+def delete_kudos_log(message_id, reactor_id):
+    """Deletes a kudos transaction from the log.
+
+    Args:
+        message_id (int): The ID of the message.
+        reactor_id (int): The ID of the user who reacted.
+    """
+    conn = get_db_connection()
+    conn.execute(
+        'DELETE FROM kudos_log WHERE message_id = ? AND reactor_id = ?',
+        (message_id, reactor_id)
     )
     conn.commit()
     conn.close()

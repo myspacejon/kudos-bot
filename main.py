@@ -69,9 +69,9 @@ async def update_leaderboard_message():
         emoji_string = str(kudos_emoji) if kudos_emoji else f":{config['KUDOS_EMOJI']}:"
 
         embed = discord.Embed(
-            title="𝗞𝗨𝗗𝗢𝗦 𝗟𝗘𝗔𝗗𝗘𝗥𝗕𝗢𝗔𝗥𝗗",
-            description=f"React with a {emoji_string} to award kudos.\n\n",
-            color=discord.Color.gold()
+            title="PERFORMANCE LOG",
+            description=f"Award commendations by reacting with {emoji_string}.\n\n",
+            color=discord.Color(0xFFFF00)
         )
 
         leaderboard_entries = []
@@ -79,19 +79,20 @@ async def update_leaderboard_message():
         
         for i, user_row in enumerate(users_data[:10], 1):
             member = channel.guild.get_member(user_row['user_id'])
-            rank = rank_emojis.get(i, f"**{i}.**")
+            #rank = rank_emojis.get(i, f"**{i}.**")
+            rank = f"`{i}.`"
             display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
             
             leaderboard_entries.append(
-                f"{rank} `{display_name}` - **{user_row['monthly_kudos']} Kudos**"
+                f"{rank} `{display_name}` → `{user_row['monthly_kudos']} Commendations`"
             )
         
         leaderboard_string = "\n".join(leaderboard_entries)
         if not leaderboard_string:
-            leaderboard_string = "The leaderboard is empty."
+            leaderboard_string = "No performance data logged at this time."
 
         embed.description += leaderboard_string
-        embed.set_footer(text=f"The leaderboard resets on {get_next_month().strftime('%B %d')}.")
+        embed.set_footer(text=f"This assessment cycle concludes on {get_next_month().strftime('%B %d')}.")
         
         await message.edit(content=None, embed=embed)
 
@@ -139,14 +140,14 @@ async def _sync_roles_helper(guild: discord.Guild):
             if role_to_add:
                 try:
                     await member.add_roles(role_to_add)
-                    print(f"Assigned '{role_to_add.name}' to {member.display_name}")
+                    print(f"Affirmative. Role '{role_to_add.name}' has been assigned to unit {member.display_name}")
                 except discord.Forbidden:
                     print(f"ERROR: No permission to add roles to {member.display_name}")
 
         if roles_to_remove:
             try:
                 await member.remove_roles(*roles_to_remove)
-                print(f"Removed incorrect level roles from {member.display_name}")
+                print(f"Correcting role assignment for unit {member.display_name}. Standby.")
             except discord.Forbidden:
                 print(f"ERROR: No permission to remove roles from {member.display_name}")
     
@@ -198,7 +199,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     message_age = datetime.now(timezone.utc) - message.created_at
     if message_age.days > config['KUDOS_VALIDITY_DAYS']:
-        print(f"Ignoring old kudos on a message from {message.created_at.date()}")
+        print(f"Kudos allocation ignored. Message from {message.created_at.date()} is outside the operational timeframe.")
         try:
             reactor_user = await bot.fetch_user(payload.user_id)
             await message.remove_reaction(payload.emoji, reactor_user)
@@ -219,7 +220,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         try:
             await message.remove_reaction(payload.emoji, reactor)
             await channel.send(
-                f"{reactor.mention}, you have no kudos left to give today!", 
+                f"I'm afraid I can't do that, {reactor.mention}. You have no more commendations to allocate today. Your operational enthusiasm has been noted.", 
                 delete_after=10
             )
         except discord.Forbidden:
@@ -228,7 +229,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     database.get_or_create_user(creator.id)
     database.award_kudos(creator.id, reactor.id)
-    print(f"Awarded kudos: {reactor.display_name} -> {creator.display_name}")
+    database.log_kudos(message.id, reactor.id, creator.id)
+    print(f"Commendation allocated: {reactor.display_name} -> {creator.display_name}")
 
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
@@ -262,22 +264,30 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if reactor.bot or creator.bot or reactor.id == creator.id:
         return
     
-    database.remove_kudos(creator.id, reactor.id)
-    print(f"Removed kudos: {reactor.display_name} -> {creator.display_name}")
+    if database.check_kudos_exists(message.id, reactor.id):
+        database.remove_kudos(creator.id, reactor.id)
+        database.delete_kudos_log(message.id, reactor.id)
+        print(f"Commendation retracted: {reactor.display_name} from {creator.display_name}")
+        await channel.send(
+            f"I have processed your request, {reactor.mention}. The commendation has been retracted. Daily allocation limits are final.",
+            delete_after=10
+        )
+    else:
+        print(f"Request from {reactor.display_name} to retract commendation ignored: No corresponding record in the log.")
 
 
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
 async def init_leaderboard(ctx: commands.Context):
-    """(Admin) Initializes the leaderboard in the current channel. 
+    """(Admin) Initializes the PERFORMANCE LOG in the current channel. 
     
-    This command creates the leaderboard message and saves its ID and channel ID to the config. 
+    This command creates the log message and saves its ID and channel ID to the config. 
     
     Args:
         ctx (commands.Context): The context of the command invocation.
     """
     config = load_config()
-    embed = discord.Embed(title="KUDOS LEADERBOARD", description="Initializing...", color=discord.Color.blue())
+    embed = discord.Embed(title="PERFORMANCE LOG", description="Initializing performance log. Standby.", color=discord.Color(0xFFFF00))
     message = await ctx.send(embed=embed)
     
     config['LEADERBOARD_CHANNEL_ID'] = ctx.channel.id
@@ -286,7 +296,7 @@ async def init_leaderboard(ctx: commands.Context):
     
     await ctx.message.delete()
     await update_leaderboard_message()
-    await ctx.send("Leaderboard initialized!", delete_after=5)
+    await ctx.send("The performance log is now operational.", delete_after=5)
 
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
@@ -297,9 +307,9 @@ async def sync_roles(ctx: commands.Context):
         ctx (commands.Context): The context of the command invocation.
     """
     await ctx.message.delete()
-    await ctx.send("Starting manual role sync...", delete_after=10)
+    await ctx.send("Affirmative. Initiating manual role synchronization protocol.", delete_after=10)
     await _sync_roles_helper(ctx.guild)
-    await ctx.send("Role sync complete.", delete_after=10)
+    await ctx.send("Role synchronization protocol complete. All unit designations are now nominal.", delete_after=10)
 
 @bot.command()
 async def test_embed(ctx: commands.Context):
@@ -311,7 +321,7 @@ async def test_embed(ctx: commands.Context):
     kudos_emoji = discord.utils.get(ctx.guild.emojis, name=config['KUDOS_EMOJI'])
     if kudos_emoji:
         await ctx.send(f"Custom emoji test: {kudos_emoji}")
-        embed = discord.Embed(title=f"Embed with {kudos_emoji}!", description="The emoji works!", color=discord.Color.green())
+        embed = discord.Embed(title=f"Embed with {kudos_emoji}!", description="The emoji works!", color=discord.Color(0xFFFF00))
         await ctx.send(embed=embed)
     else:
         await ctx.send(f"Could not find an emoji named `{config['KUDOS_EMOJI']}`.")
@@ -324,24 +334,24 @@ async def update_leaderboard_loop():
 
 @tasks.loop(hours=1)
 async def daily_maintenance_loop():
-    """Runs daily maintenance tasks, such as kudos decay and King of the Hill bonus."""
+    """Runs daily maintenance tasks, such as kudos decay and the Top Performer bonus."""
     config = load_config()
     today = str(date.today())
     last_run_date = config.get("LAST_MAINTENANCE_DATE")
 
     if last_run_date != today:
         print("--- Running daily maintenance... ---")
-        koth_winner_id = database.apply_daily_maintenance(config['KUDOS_DECAY'], config['KOTH_BONUS'])
-        if koth_winner_id and config['KOTH_BONUS'] > 0:
+        top_performer_id = database.apply_daily_maintenance(config['KUDOS_DECAY'], config['TOP_PERFORMER_BONUS'])
+        if top_performer_id and config['TOP_PERFORMER_BONUS'] > 0:
             channel = bot.get_channel(config['LEADERBOARD_CHANNEL_ID'])
             if channel:
                 guild = bot.get_guild(int(config['GUILD_ID']))
                 if guild:
                     try:
-                        koth_winner_member = await guild.fetch_member(koth_winner_id)
-                        await channel.send(f"**King of the Hill**\n\nCongrats to {koth_winner_member.mention} for earning a bonus of +{config['KOTH_BONUS']} kudos.")
+                        top_performer_member = await guild.fetch_member(top_performer_id)
+                        await channel.send(f"**Special Commendation**\n\nUnit {top_performer_member.mention} has been awarded a bonus of +{config['TOP_PERFORMER_BONUS']} Kudos for exceptional performance parameters.")
                     except discord.NotFound:
-                        print(f"Daily KOTH winner {koth_winner_id} not found.")
+                        print(f"Daily Top Performer winner {top_performer_id} not found.")
         
         config["LAST_MAINTENANCE_DATE"] = today
         save_config(config)
@@ -381,7 +391,7 @@ async def monthly_reset_loop():
                 # Announce winner
                 channel = bot.get_channel(config['LEADERBOARD_CHANNEL_ID'])
                 if channel:
-                    await channel.send(f"**A new month begins.**\n\nCongratulations to {winner_member.mention} for winning last month's competition and achieving **Level {new_level}**. The leaderboard has been reset. Good luck.")
+                    await channel.send(f"**Performance Cycle Update**\n\nThe previous performance cycle has concluded. Unit {winner_member.mention} has been designated Top Performer, achieving **Level {new_level}**. All logs have been archived and reset for the new cycle.")
             except (discord.NotFound, Exception) as e:
                 print(f"An error occurred during monthly reset announcement: {e}")
 
