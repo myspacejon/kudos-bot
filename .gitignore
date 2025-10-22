@@ -140,5 +140,3 @@ cython_debug/
 # Database
 kudos_bot.db
 
-# Config
-config.json
