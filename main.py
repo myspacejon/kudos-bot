@@ -6,8 +6,6 @@ import discord
 from discord.ext import tasks, commands
 import database
 
-# --- CONFIGURATION ---
-
 def load_config():
     """Loads the configuration from config.json."""
     with open('config.json', 'r') as f:
@@ -24,8 +22,6 @@ def save_config(data):
 
 config = load_config()
 
-# --- BOT SETUP ---
-
 intents = discord.Intents.default()
 intents.reactions = True
 intents.guilds = True
@@ -35,8 +31,6 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 bot.setup_done = False
-
-# --- HELPER FUNCTIONS ---
 
 def get_next_month():
     """Calculates the datetime for the start of the next month.
@@ -155,8 +149,6 @@ async def _sync_roles_helper(guild: discord.Guild):
     
     print("Role synchronization complete.")
 
-# --- BOT EVENTS ---
-
 @bot.event
 async def on_ready():
     await bot.wait_until_ready()
@@ -166,7 +158,6 @@ async def on_ready():
 
     print(f'Logged in as {bot.user}')
 
-    # <<< --- NEW RESTORE LOGIC --- >>>
     print("--- Attempting to restore database from backup ---")
     backup_channel_id = config.get("BACKUP_CHANNEL_ID")
     if backup_channel_id:
