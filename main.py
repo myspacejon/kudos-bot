@@ -327,7 +327,7 @@ async def test_embed(ctx: commands.Context):
         await ctx.send(f"Could not find an emoji named `{config['KUDOS_EMOJI']}`.")
 
 
-@tasks.loop(seconds=30)
+@tasks.loop(seconds=10)
 async def update_leaderboard_loop():
     """Periodically updates the leaderboard message every 30 seconds."""
     await update_leaderboard_message()
