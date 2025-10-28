@@ -23,7 +23,9 @@ def setup_database():
             monthly_kudos INTEGER DEFAULT 0,
             lifetime_level INTEGER DEFAULT 1,
             daily_awards_given INTEGER DEFAULT 0,
-            last_award_date TEXT
+            last_award_date TEXT,
+            last_message_date TEXT,
+            greeting_enabled INTEGER DEFAULT 1
         )
     """)
     conn.execute("""
@@ -34,6 +36,20 @@ def setup_database():
             PRIMARY KEY (message_id, reactor_id)
         )
     """)
+
+    # Migration: Add new columns to existing tables if they don't exist
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN last_message_date TEXT")
+        print("Added last_message_date column to users table.")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN greeting_enabled INTEGER DEFAULT 1")
+        print("Added greeting_enabled column to users table.")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
     conn.close()
     print("Database setup complete.")
@@ -214,6 +230,62 @@ def delete_kudos_log(message_id, reactor_id):
     conn.execute(
         'DELETE FROM kudos_log WHERE message_id = ? AND reactor_id = ?',
         (message_id, reactor_id)
+    )
+    conn.commit()
+    conn.close()
+
+def update_last_message_date(user_id, message_date):
+    """Updates the last message date for a user.
+
+    Args:
+        user_id (int): The Discord user's ID.
+        message_date (str): The date in ISO format (YYYY-MM-DD).
+    """
+    conn = get_db_connection()
+    conn.execute(
+        'UPDATE users SET last_message_date = ? WHERE user_id = ?',
+        (message_date, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+def toggle_user_greeting(user_id):
+    """Toggles the greeting_enabled setting for a user.
+
+    Args:
+        user_id (int): The Discord user's ID.
+
+    Returns:
+        bool: The new state of greeting_enabled (True if enabled, False if disabled).
+    """
+    user = get_or_create_user(user_id)
+    current_state = user['greeting_enabled'] if user['greeting_enabled'] is not None else 1
+    new_state = 0 if current_state == 1 else 1
+
+    conn = get_db_connection()
+    conn.execute(
+        'UPDATE users SET greeting_enabled = ? WHERE user_id = ?',
+        (new_state, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return new_state == 1
+
+def award_daily_greeting_kudos(creator_id, bot_id):
+    """Awards kudos for daily first message (bot gives kudos with infinite supply).
+
+    Awards +1 kudos to the message creator, +0 to the bot.
+    This is a special version of award_kudos for the daily greeting feature.
+
+    Args:
+        creator_id (int): The ID of the user who created the message.
+        bot_id (int): The ID of the bot (not used for kudos, just for logging).
+    """
+    conn = get_db_connection()
+    conn.execute(
+        'UPDATE users SET monthly_kudos = monthly_kudos + 1 WHERE user_id = ?',
+        (creator_id,)
     )
     conn.commit()
     conn.close()

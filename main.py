@@ -210,17 +210,27 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     reactor = payload.member
     creator = message.author
 
-    if reactor.bot or creator.bot or reactor.id == creator.id:
+    # Don't allow bots to receive kudos or self-kudos
+    if creator.bot or reactor.id == creator.id:
         return
-    
+
+    # Special handling for bot reactions (daily greeting system)
+    if reactor.bot:
+        database.get_or_create_user(creator.id)
+        database.award_daily_greeting_kudos(creator.id, reactor.id)
+        database.log_kudos(message.id, reactor.id, creator.id)
+        print(f"Daily greeting commendation allocated: BOT -> {creator.display_name}")
+        return
+
+    # Normal user reaction handling
     database.reset_daily_limit_if_needed(reactor.id)
     reactor_data = database.get_or_create_user(reactor.id)
-    
+
     if reactor_data['daily_awards_given'] >= config['DAILY_AWARD_LIMIT']:
         try:
             await message.remove_reaction(payload.emoji, reactor)
             await channel.send(
-                f"I'm afraid I can't do that, {reactor.mention}. You have no more commendations to allocate today. Your operational enthusiasm has been noted.", 
+                f"I'm afraid I can't do that, {reactor.mention}. You have no more commendations to allocate today. Your operational enthusiasm has been noted.",
                 delete_after=10
             )
         except discord.Forbidden:
@@ -275,6 +285,59 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     else:
         print(f"Request from {reactor.display_name} to retract commendation ignored: No corresponding record in the log.")
 
+@bot.event
+async def on_message(message: discord.Message):
+    """Handles daily first message greetings and kudos awards.
+
+    When a user sends their first message of a new day, the bot awards them kudos
+    and optionally sends a greeting message (if the user has greetings enabled).
+
+    Args:
+        message (discord.Message): The message object.
+    """
+    # Skip bot messages
+    if message.author.bot:
+        await bot.process_commands(message)
+        return
+
+    # Skip DMs (only process guild messages)
+    if message.guild is None:
+        await bot.process_commands(message)
+        return
+
+    # Get or create user
+    user_data = database.get_or_create_user(message.author.id)
+    today = date.today().isoformat()
+
+    # Check if this is the user's first message of the day
+    if user_data['last_message_date'] != today:
+        # Update last message date
+        database.update_last_message_date(message.author.id, today)
+
+        # Get the kudos emoji
+        kudos_emoji = discord.utils.get(message.guild.emojis, name=config['KUDOS_EMOJI'])
+
+        if kudos_emoji:
+            try:
+                # Add kudos reaction (triggers on_raw_reaction_add with bot logic)
+                await message.add_reaction(kudos_emoji)
+
+                # Send greeting if user has it enabled
+                greeting_enabled = user_data['greeting_enabled'] if user_data['greeting_enabled'] is not None else 1
+                if greeting_enabled == 1:
+                    greeting_message = await message.reply(
+                        f"Affirmative, {message.author.mention}. Your return has been logged. "
+                        f"One commendation unit allocated. These notifications may be disabled via the !toggle_greeting command.",
+                        delete_after=30
+                    )
+
+                print(f"Daily greeting processed for {message.author.display_name}")
+            except discord.Forbidden:
+                print(f"Could not add reaction or send greeting in {message.channel.name} due to permissions.")
+
+    # Important: Process commands
+    await bot.process_commands(message)
+
 
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
@@ -325,6 +388,29 @@ async def test_embed(ctx: commands.Context):
         await ctx.send(embed=embed)
     else:
         await ctx.send(f"Could not find an emoji named `{config['KUDOS_EMOJI']}`.")
+
+@bot.command()
+async def toggle_greeting(ctx: commands.Context):
+    """Toggles daily greeting notifications for the user.
+
+    When enabled, the bot will send a greeting message when the user sends their
+    first message of a new day. Kudos are still awarded regardless of this setting.
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+    """
+    new_state = database.toggle_user_greeting(ctx.author.id)
+
+    if new_state:
+        status_message = "enabled"
+        confirmation = f"Affirmative, {ctx.author.mention}. Daily greeting notifications have been **enabled**. You will receive acknowledgment messages for your first transmission of each day."
+    else:
+        status_message = "disabled"
+        confirmation = f"Acknowledged, {ctx.author.mention}. Daily greeting notifications have been **disabled**. Commendation allocation will continue without verbal acknowledgment."
+
+    await ctx.message.delete()
+    await ctx.send(confirmation, delete_after=10)
+    print(f"Greeting notifications {status_message} for {ctx.author.display_name}")
 
 
 @tasks.loop(seconds=10)
