@@ -207,19 +207,27 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             pass
         return
 
-    reactor = payload.member
     creator = message.author
 
-    # Don't allow bots to receive kudos or self-kudos
-    if creator.bot or reactor.id == creator.id:
+    # Don't allow bots to receive kudos
+    if creator.bot:
         return
 
     # Special handling for bot reactions (daily greeting system)
-    if reactor.bot:
+    # Check user_id directly since payload.member might be None for bot
+    if payload.user_id == bot.user.id:
         database.get_or_create_user(creator.id)
-        database.award_daily_greeting_kudos(creator.id, reactor.id)
-        database.log_kudos(message.id, reactor.id, creator.id)
+        database.award_daily_greeting_kudos(creator.id, bot.user.id)
+        database.log_kudos(message.id, bot.user.id, creator.id)
         print(f"Daily greeting commendation allocated: BOT -> {creator.display_name}")
+        return
+
+    reactor = payload.member
+    if not reactor:
+        return
+
+    # Don't allow self-kudos
+    if reactor.id == creator.id:
         return
 
     # Normal user reaction handling
@@ -411,6 +419,63 @@ async def toggle_greeting(ctx: commands.Context):
     await ctx.message.delete()
     await ctx.send(confirmation, delete_after=10)
     print(f"Greeting notifications {status_message} for {ctx.author.display_name}")
+
+@bot.command()
+async def add_commendations(ctx: commands.Context, member: discord.Member = None, amount: int = None):
+    """(Owner Only) Manually adds commendations to a specified user.
+
+    This command can only be used by the bot owner (user ID: 437871588864425986).
+
+    Usage: !add_commendations @user amount
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+        member (discord.Member): The member to award commendations to.
+        amount (int): The number of commendations to add.
+    """
+    # Check if the user is authorized
+    if ctx.author.id != 437871588864425986:
+        await ctx.send(
+            f"I'm afraid I can't do that, {ctx.author.mention}. This command is restricted to authorized personnel only.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    # Validate parameters
+    if member is None or amount is None:
+        await ctx.send(
+            f"Invalid parameters, {ctx.author.mention}. Usage: `!add_commendations @user amount`",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    if amount <= 0:
+        await ctx.send(
+            f"Error: Commendation amount must be a positive integer.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    # Add kudos
+    database.get_or_create_user(member.id)
+    conn = database.get_db_connection()
+    conn.execute(
+        'UPDATE users SET monthly_kudos = monthly_kudos + ? WHERE user_id = ?',
+        (amount, member.id)
+    )
+    conn.commit()
+    conn.close()
+
+    # Send confirmation
+    await ctx.message.delete()
+    await ctx.send(
+        f"Affirmative. **{amount}** commendation unit{'s' if amount != 1 else ''} allocated to {member.mention}. Operation complete.",
+        delete_after=10
+    )
+    print(f"Manual commendations: {ctx.author.display_name} added {amount} to {member.display_name}")
 
 
 @tasks.loop(seconds=10)
