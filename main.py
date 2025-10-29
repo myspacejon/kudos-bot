@@ -533,6 +533,35 @@ async def add_commendations(ctx: commands.Context, member: discord.Member = None
     )
     print(f"Manual commendations: {ctx.author.display_name} added {amount} to {member.display_name}")
 
+@bot.command()
+async def systemtime(ctx: commands.Context):
+    """Displays the current system time for debugging purposes.
+
+    Shows the system time in multiple formats including local time, UTC,
+    and ISO format for timezone debugging.
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+    """
+    now_local = datetime.now()
+    now_utc = datetime.now(timezone.utc)
+    today_date = date.today()
+
+    embed = discord.Embed(
+        title="System Time (Debug Info)",
+        color=discord.Color(0x00BFFF)
+    )
+    embed.add_field(name="Local Time", value=f"`{now_local.strftime('%Y-%m-%d %H:%M:%S')}`", inline=False)
+    embed.add_field(name="UTC Time", value=f"`{now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}`", inline=False)
+    embed.add_field(name="ISO Format (Local)", value=f"`{now_local.isoformat()}`", inline=False)
+    embed.add_field(name="ISO Format (UTC)", value=f"`{now_utc.isoformat()}`", inline=False)
+    embed.add_field(name="Date (today)", value=f"`{today_date.isoformat()}`", inline=False)
+    embed.add_field(name="Unix Timestamp", value=f"`{int(now_utc.timestamp())}`", inline=False)
+
+    await ctx.send(embed=embed, delete_after=30)
+    await ctx.message.delete()
+    print(f"System time debug info requested by {ctx.author.display_name}")
+
 
 @tasks.loop(seconds=10)
 async def update_leaderboard_loop():
