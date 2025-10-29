@@ -332,19 +332,22 @@ async def on_message(message: discord.Message):
 
             if kudos_emoji:
                 try:
-                    # Add kudos reaction (triggers on_raw_reaction_add with bot logic)
+                    # Always add kudos reaction (triggers on_raw_reaction_add with bot logic)
                     await message.add_reaction(kudos_emoji)
+                    print(f"Daily kudos awarded to {message.author.display_name}")
 
-                    # Send greeting if user has it enabled
-                    greeting_enabled = user_data['greeting_enabled'] if user_data['greeting_enabled'] is not None else 1
-                    if greeting_enabled == 1:
+                    # Send greeting message only if both config and user settings allow it
+                    global_greeting_enabled = config.get('DAILY_GREETING_ENABLED', True)
+                    user_greeting_enabled = user_data['greeting_enabled'] if user_data['greeting_enabled'] is not None else 1
+
+                    if global_greeting_enabled and user_greeting_enabled == 1:
                         greeting_message = await message.reply(
                             f"Affirmative, {message.author.mention}. Your return has been logged. "
                             f"One commendation unit allocated. These notifications may be disabled via the !toggle_greeting command.",
                             delete_after=30
                         )
+                        print(f"Daily greeting message sent to {message.author.display_name}")
 
-                    print(f"Daily greeting processed for {message.author.display_name}")
                 except discord.Forbidden:
                     print(f"Could not add reaction or send greeting in {message.channel.name} due to permissions.")
         else:
