@@ -1,10 +1,11 @@
 import os
 import json
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 import discord
 from discord.ext import tasks, commands
 import database
+from database import get_vancouver_now, get_vancouver_today
 
 
 def load_config():
@@ -36,12 +37,12 @@ bot.setup_done = False
 
 
 def get_next_month():
-    """Calculates the datetime for the start of the next month.
+    """Calculates the datetime for the start of the next month in Vancouver timezone.
 
     Returns:
-        datetime: The datetime object for the first day of the next month.
+        datetime: The datetime object for the first day of the next month in Vancouver timezone.
     """
-    today = datetime.now()
+    today = get_vancouver_now()
     return (today.replace(day=1) + relativedelta(months=1)).replace(hour=0, minute=0, second=0)
 
 async def update_leaderboard_message():
@@ -315,7 +316,7 @@ async def on_message(message: discord.Message):
 
     # Get or create user
     user_data = database.get_or_create_user(message.author.id)
-    today = date.today().isoformat()
+    today = get_vancouver_today()
 
     # Check if this is the user's first message of the day (but not their first message ever)
     if user_data['last_message_date'] != today:
@@ -543,19 +544,19 @@ async def systemtime(ctx: commands.Context):
     Args:
         ctx (commands.Context): The context of the command invocation.
     """
+    now_vancouver = get_vancouver_now()
     now_local = datetime.now()
     now_utc = datetime.now(timezone.utc)
-    today_date = date.today()
+    today_vancouver = get_vancouver_today()
 
     embed = discord.Embed(
         title="System Time (Debug Info)",
         color=discord.Color(0x00BFFF)
     )
-    embed.add_field(name="Local Time", value=f"`{now_local.strftime('%Y-%m-%d %H:%M:%S')}`", inline=False)
+    embed.add_field(name="Vancouver Time (Bot Timezone)", value=f"`{now_vancouver.strftime('%Y-%m-%d %H:%M:%S %Z')}`", inline=False)
+    embed.add_field(name="Vancouver Date (Used for daily reset)", value=f"`{today_vancouver}`", inline=False)
+    embed.add_field(name="Server Local Time", value=f"`{now_local.strftime('%Y-%m-%d %H:%M:%S')}`", inline=False)
     embed.add_field(name="UTC Time", value=f"`{now_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}`", inline=False)
-    embed.add_field(name="ISO Format (Local)", value=f"`{now_local.isoformat()}`", inline=False)
-    embed.add_field(name="ISO Format (UTC)", value=f"`{now_utc.isoformat()}`", inline=False)
-    embed.add_field(name="Date (today)", value=f"`{today_date.isoformat()}`", inline=False)
     embed.add_field(name="Unix Timestamp", value=f"`{int(now_utc.timestamp())}`", inline=False)
 
     await ctx.send(embed=embed, delete_after=30)
@@ -572,7 +573,7 @@ async def update_leaderboard_loop():
 async def daily_maintenance_loop():
     """Runs daily maintenance tasks, such as kudos decay and the Top Performer bonus."""
     config = load_config()
-    today = str(date.today())
+    today = get_vancouver_today()
     last_run_date = config.get("LAST_MAINTENANCE_DATE")
 
     if last_run_date != today:
@@ -596,7 +597,7 @@ async def daily_maintenance_loop():
 @tasks.loop(hours=24)
 async def monthly_reset_loop():
     """Checks daily if it's the first of the month to run the monthly reset."""
-    today = datetime.now()
+    today = get_vancouver_now()
     if today.day == 1:
         print("Running monthly reset...")
         winner_data = database.monthly_reset()

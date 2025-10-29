@@ -1,8 +1,28 @@
 import sqlite3
-from datetime import date
+from datetime import datetime
 import os
+import pytz
 
 DB_FILE = "/data/kudos_bot.db"
+
+# Timezone configuration for America/Vancouver (PST/PDT)
+VANCOUVER_TZ = pytz.timezone('America/Vancouver')
+
+def get_vancouver_now():
+    """Returns the current datetime in America/Vancouver timezone.
+
+    Returns:
+        datetime: Timezone-aware datetime object for Vancouver.
+    """
+    return datetime.now(VANCOUVER_TZ)
+
+def get_vancouver_today():
+    """Returns today's date in America/Vancouver timezone as an ISO string.
+
+    Returns:
+        str: Today's date in ISO format (YYYY-MM-DD) in Vancouver timezone.
+    """
+    return get_vancouver_now().date().isoformat()
 
 def get_db_connection():
     """Establishes a connection to the SQLite database.
@@ -81,7 +101,7 @@ def award_kudos(creator_id, reactor_id):
     """
     print("Attempting to commit changes to the database...")
     conn = get_db_connection()
-    today = date.today().isoformat()
+    today = get_vancouver_today()
     conn.execute(
         'UPDATE users SET monthly_kudos = monthly_kudos + 2 WHERE user_id = ?', 
         (creator_id,)
@@ -100,7 +120,7 @@ def reset_daily_limit_if_needed(user_id):
         user_id (int): The Discord user's ID.
     """
     user = get_or_create_user(user_id)
-    today = date.today().isoformat()
+    today = get_vancouver_today()
     if user['last_award_date'] != today:
         conn = get_db_connection()
         conn.execute('UPDATE users SET daily_awards_given = 0, last_award_date = ? WHERE user_id = ?', (today, user_id))
