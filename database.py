@@ -122,19 +122,22 @@ def apply_daily_maintenance(decay: int, bonus: int):
     """Applies daily kudos decay to all users and awards a bonus to the top user.
 
     Args:
-        decay (int): The amount of kudos to remove from each user.
+        decay (int): The amount of kudos to remove from each user. If 0, no decay is applied.
         bonus (int): The amount of bonus kudos to give to the top user.
 
     Returns:
         int | None: The ID of the top user who received the bonus, or None if no users have kudos.
     """
     conn = get_db_connection()
-    conn.execute('UPDATE users SET monthly_kudos = monthly_kudos - ? WHERE monthly_kudos > ?', (decay, decay-1))
-    
+
+    # Only apply decay if decay > 0
+    if decay > 0:
+        conn.execute('UPDATE users SET monthly_kudos = monthly_kudos - ? WHERE monthly_kudos > ?', (decay, decay-1))
+
     top_user = conn.execute('SELECT user_id FROM users ORDER BY monthly_kudos DESC LIMIT 1').fetchone()
-    if top_user:
+    if top_user and bonus > 0:
         conn.execute('UPDATE users SET monthly_kudos = monthly_kudos + ? WHERE user_id = ?', (bonus, top_user['user_id']))
-        
+
     conn.commit()
     conn.close()
     if top_user:
@@ -289,3 +292,31 @@ def award_daily_greeting_kudos(creator_id, bot_id):
     )
     conn.commit()
     conn.close()
+
+def reset_daily_limits(user_id=None):
+    """Resets daily award limits for a specific user or all users.
+
+    This sets daily_awards_given to 0 and last_award_date to NULL, allowing
+    users to give kudos again immediately.
+
+    Args:
+        user_id (int, optional): The Discord user's ID. If None, resets all users.
+
+    Returns:
+        int: The number of users affected.
+    """
+    conn = get_db_connection()
+
+    if user_id is not None:
+        conn.execute(
+            'UPDATE users SET daily_awards_given = 0, last_award_date = NULL WHERE user_id = ?',
+            (user_id,)
+        )
+    else:
+        conn.execute('UPDATE users SET daily_awards_given = 0, last_award_date = NULL')
+
+    affected_rows = conn.total_changes
+    conn.commit()
+    conn.close()
+
+    return affected_rows

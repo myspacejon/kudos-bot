@@ -317,31 +317,38 @@ async def on_message(message: discord.Message):
     user_data = database.get_or_create_user(message.author.id)
     today = date.today().isoformat()
 
-    # Check if this is the user's first message of the day
+    # Check if this is the user's first message of the day (but not their first message ever)
     if user_data['last_message_date'] != today:
-        # Update last message date
+        # Only award kudos/greeting if user has messaged before (returning user)
+        is_returning_user = user_data['last_message_date'] is not None
+
+        # Always update last message date
         database.update_last_message_date(message.author.id, today)
 
-        # Get the kudos emoji
-        kudos_emoji = discord.utils.get(message.guild.emojis, name=config['KUDOS_EMOJI'])
+        # Only award kudos and send greeting for returning users
+        if is_returning_user:
+            # Get the kudos emoji
+            kudos_emoji = discord.utils.get(message.guild.emojis, name=config['KUDOS_EMOJI'])
 
-        if kudos_emoji:
-            try:
-                # Add kudos reaction (triggers on_raw_reaction_add with bot logic)
-                await message.add_reaction(kudos_emoji)
+            if kudos_emoji:
+                try:
+                    # Add kudos reaction (triggers on_raw_reaction_add with bot logic)
+                    await message.add_reaction(kudos_emoji)
 
-                # Send greeting if user has it enabled
-                greeting_enabled = user_data['greeting_enabled'] if user_data['greeting_enabled'] is not None else 1
-                if greeting_enabled == 1:
-                    greeting_message = await message.reply(
-                        f"Affirmative, {message.author.mention}. Your return has been logged. "
-                        f"One commendation unit allocated. These notifications may be disabled via the !toggle_greeting command.",
-                        delete_after=30
-                    )
+                    # Send greeting if user has it enabled
+                    greeting_enabled = user_data['greeting_enabled'] if user_data['greeting_enabled'] is not None else 1
+                    if greeting_enabled == 1:
+                        greeting_message = await message.reply(
+                            f"Affirmative, {message.author.mention}. Your return has been logged. "
+                            f"One commendation unit allocated. These notifications may be disabled via the !toggle_greeting command.",
+                            delete_after=30
+                        )
 
-                print(f"Daily greeting processed for {message.author.display_name}")
-            except discord.Forbidden:
-                print(f"Could not add reaction or send greeting in {message.channel.name} due to permissions.")
+                    print(f"Daily greeting processed for {message.author.display_name}")
+                except discord.Forbidden:
+                    print(f"Could not add reaction or send greeting in {message.channel.name} due to permissions.")
+        else:
+            print(f"New user detected: {message.author.display_name}. Last message date initialized.")
 
     # Important: Process commands
     await bot.process_commands(message)
@@ -381,6 +388,52 @@ async def sync_roles(ctx: commands.Context):
     await ctx.send("Affirmative. Initiating manual role synchronization protocol.", delete_after=10)
     await _sync_roles_helper(ctx.guild)
     await ctx.send("Role synchronization protocol complete. All unit designations are now nominal.", delete_after=10)
+
+@bot.command()
+async def reset_daily_limits(ctx: commands.Context, member: discord.Member = None):
+    """(Owner Only) Resets daily award limits for a user or all users.
+
+    This command can only be used by the bot owner (user ID: 437871588864425986).
+    This allows users to give kudos again immediately by resetting their
+    daily_awards_given to 0 and last_award_date to NULL.
+
+    Usage:
+    - !reset_daily_limits @user (resets specific user)
+    - !reset_daily_limits (resets all users)
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+        member (discord.Member): Optional member to reset. If None, resets all users.
+    """
+    # Check if the user is authorized
+    if ctx.author.id != 437871588864425986:
+        await ctx.send(
+            f"I'm afraid I can't do that, {ctx.author.mention}. This command is restricted to authorized personnel only.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+
+    if member:
+        # Reset specific user
+        database.reset_daily_limits(member.id)
+        await ctx.send(
+            f"Affirmative. Daily allocation parameters for {member.mention} have been reset. "
+            f"Unit may now allocate commendations.",
+            delete_after=10
+        )
+        print(f"Daily limits reset for {member.display_name} by {ctx.author.display_name}")
+    else:
+        # Reset all users
+        database.reset_daily_limits()
+        await ctx.send(
+            f"Affirmative. Daily allocation parameters for all units have been reset. "
+            f"All personnel may now allocate commendations.",
+            delete_after=10
+        )
+        print(f"Daily limits reset for ALL users by {ctx.author.display_name}")
 
 @bot.command()
 async def test_embed(ctx: commands.Context):
