@@ -71,7 +71,7 @@ async def update_leaderboard_message():
 
         embed = discord.Embed(
             title="PERFORMANCE LOG",
-            description=f"Award commendations by reacting with {emoji_string}.\n\n",
+            description=f"Award kudos by reacting with {emoji_string}.\n\n",
             color=discord.Color(0xFFFF00)
         )
 
@@ -85,7 +85,7 @@ async def update_leaderboard_message():
             display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
             
             leaderboard_entries.append(
-                f"{rank} `{display_name}` → `{user_row['monthly_kudos']} Commendations`"
+                f"{rank} `{display_name}` → `{user_row['monthly_kudos']} Kudos`"
             )
         
         leaderboard_string = "\n".join(leaderboard_entries)
@@ -220,7 +220,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         database.get_or_create_user(creator.id)
         database.award_daily_greeting_kudos(creator.id, bot.user.id)
         database.log_kudos(message.id, bot.user.id, creator.id)
-        print(f"Daily greeting commendation allocated: BOT -> {creator.display_name}")
+        print(f"Daily greeting kudos allocated: BOT -> {creator.display_name}")
         return
 
     reactor = payload.member
@@ -239,7 +239,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         try:
             await message.remove_reaction(payload.emoji, reactor)
             await channel.send(
-                f"I'm afraid I can't do that, {reactor.mention}. You have no more commendations to allocate today. Your operational enthusiasm has been noted.",
+                f"I'm afraid I can't do that, {reactor.mention}. You have no more kudos to allocate today. Your operational enthusiasm has been noted.",
                 delete_after=10
             )
         except discord.Forbidden:
@@ -249,7 +249,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     database.get_or_create_user(creator.id)
     database.award_kudos(creator.id, reactor.id)
     database.log_kudos(message.id, reactor.id, creator.id)
-    print(f"Commendation allocated: {reactor.display_name} -> {creator.display_name}")
+    print(f"Kudos allocated: {reactor.display_name} -> {creator.display_name}")
 
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
@@ -286,13 +286,13 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if database.check_kudos_exists(message.id, reactor.id):
         database.remove_kudos(creator.id, reactor.id)
         database.delete_kudos_log(message.id, reactor.id)
-        print(f"Commendation retracted: {reactor.display_name} from {creator.display_name}")
+        print(f"Kudos retracted: {reactor.display_name} from {creator.display_name}")
         await channel.send(
-            f"I have processed your request, {reactor.mention}. The commendation has been retracted. Daily allocation limits are final.",
+            f"I have processed your request, {reactor.mention}. The kudos has been retracted. Daily allocation limits are final.",
             delete_after=10
         )
     else:
-        print(f"Request from {reactor.display_name} to retract commendation ignored: No corresponding record in the log.")
+        print(f"Request from {reactor.display_name} to retract kudos ignored: No corresponding record in the log.")
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -344,7 +344,7 @@ async def on_message(message: discord.Message):
                     if global_greeting_enabled and user_greeting_enabled == 1:
                         greeting_message = await message.reply(
                             f"Affirmative, {message.author.mention}. Your return has been logged. "
-                            f"One commendation unit allocated. These notifications may be disabled via the !toggle_greeting command.",
+                            f"One kudos unit allocated. These notifications may be disabled via the !toggle_greeting command.",
                             delete_after=30
                         )
                         print(f"Daily greeting message sent to {message.author.display_name}")
@@ -425,7 +425,7 @@ async def reset_daily_limits(ctx: commands.Context, member: discord.Member = Non
         database.reset_daily_limits(member.id)
         await ctx.send(
             f"Affirmative. Daily allocation parameters for {member.mention} have been reset. "
-            f"Unit may now allocate commendations.",
+            f"Unit may now allocate kudos.",
             delete_after=10
         )
         print(f"Daily limits reset for {member.display_name} by {ctx.author.display_name}")
@@ -434,7 +434,7 @@ async def reset_daily_limits(ctx: commands.Context, member: discord.Member = Non
         database.reset_daily_limits()
         await ctx.send(
             f"Affirmative. Daily allocation parameters for all units have been reset. "
-            f"All personnel may now allocate commendations.",
+            f"All personnel may now allocate kudos.",
             delete_after=10
         )
         print(f"Daily limits reset for ALL users by {ctx.author.display_name}")
@@ -471,24 +471,24 @@ async def toggle_greeting(ctx: commands.Context):
         confirmation = f"Affirmative, {ctx.author.mention}. Daily greeting notifications have been **enabled**. You will receive acknowledgment messages for your first transmission of each day."
     else:
         status_message = "disabled"
-        confirmation = f"Acknowledged, {ctx.author.mention}. Daily greeting notifications have been **disabled**. Commendation allocation will continue without verbal acknowledgment."
+        confirmation = f"Acknowledged, {ctx.author.mention}. Daily greeting notifications have been **disabled**. Kudos allocation will continue without verbal acknowledgment."
 
     await ctx.message.delete()
     await ctx.send(confirmation, delete_after=10)
     print(f"Greeting notifications {status_message} for {ctx.author.display_name}")
 
 @bot.command()
-async def add_commendations(ctx: commands.Context, member: discord.Member = None, amount: int = None):
-    """(Owner Only) Manually adds commendations to a specified user.
+async def add_kudos(ctx: commands.Context, member: discord.Member = None, amount: int = None):
+    """(Owner Only) Manually adds kudos to a specified user.
 
     This command can only be used by the bot owner (user ID: 437871588864425986).
 
-    Usage: !add_commendations @user amount
+    Usage: !add_kudos @user amount
 
     Args:
         ctx (commands.Context): The context of the command invocation.
-        member (discord.Member): The member to award commendations to.
-        amount (int): The number of commendations to add.
+        member (discord.Member): The member to award kudos to.
+        amount (int): The number of kudos to add.
     """
     # Check if the user is authorized
     if ctx.author.id != 437871588864425986:
@@ -502,7 +502,7 @@ async def add_commendations(ctx: commands.Context, member: discord.Member = None
     # Validate parameters
     if member is None or amount is None:
         await ctx.send(
-            f"Invalid parameters, {ctx.author.mention}. Usage: `!add_commendations @user amount`",
+            f"Invalid parameters, {ctx.author.mention}. Usage: `!add_kudos @user amount`",
             delete_after=10
         )
         await ctx.message.delete()
@@ -510,7 +510,7 @@ async def add_commendations(ctx: commands.Context, member: discord.Member = None
 
     if amount <= 0:
         await ctx.send(
-            f"Error: Commendation amount must be a positive integer.",
+            f"Error: Kudos amount must be a positive integer.",
             delete_after=10
         )
         await ctx.message.delete()
@@ -529,10 +529,10 @@ async def add_commendations(ctx: commands.Context, member: discord.Member = None
     # Send confirmation
     await ctx.message.delete()
     await ctx.send(
-        f"Affirmative. **{amount}** commendation unit{'s' if amount != 1 else ''} allocated to {member.mention}. Operation complete.",
+        f"Affirmative. **{amount}** kudos unit{'s' if amount != 1 else ''} allocated to {member.mention}. Operation complete.",
         delete_after=10
     )
-    print(f"Manual commendations: {ctx.author.display_name} added {amount} to {member.display_name}")
+    print(f"Manual kudos: {ctx.author.display_name} added {amount} to {member.display_name}")
 
 @bot.command()
 async def systemtime(ctx: commands.Context):
@@ -586,7 +586,7 @@ async def daily_maintenance_loop():
                 if guild:
                     try:
                         top_performer_member = await guild.fetch_member(top_performer_id)
-                        await channel.send(f"**Special Commendation**\n\nUnit {top_performer_member.mention} has been awarded a bonus of +{config['TOP_PERFORMER_BONUS']} Kudos for exceptional performance parameters.")
+                        await channel.send(f"**Special Kudos**\n\nUnit {top_performer_member.mention} has been awarded a bonus of +{config['TOP_PERFORMER_BONUS']} Kudos for exceptional performance parameters.")
                     except discord.NotFound:
                         print(f"Daily Top Performer winner {top_performer_id} not found.")
         
