@@ -102,6 +102,61 @@ async def update_leaderboard_message():
     except Exception as e:
         print(f"An error occurred while updating the leaderboard: {e}")
 
+async def update_history_message():
+    """Fetches monthly history data and updates the history message embed.
+
+    If the history message is not configured, this function does nothing.
+    """
+    config = load_config()
+    channel_id = config.get('LEADERBOARD_CHANNEL_ID')
+    message_id = config.get('HISTORY_MESSAGE_ID')
+
+    if not channel_id or not message_id:
+        return
+
+    try:
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            print(f"Error: Channel with ID {channel_id} not found.")
+            return
+
+        message = await channel.fetch_message(message_id)
+        history_data = database.get_monthly_history()
+
+        embed = discord.Embed(
+            title="PERFORMANCE HISTORY",
+            description="Records of past assessment cycle winners.\n\n",
+            color=discord.Color(0x00BFFF)
+        )
+
+        if not history_data:
+            embed.description += "No historical records available."
+        else:
+            history_entries = []
+            for record in history_data:
+                member = channel.guild.get_member(record['user_id'])
+                display_name = member.display_name if member else f"User ID: {record['user_id']}"
+
+                # Parse month (YYYY-MM) and format it nicely
+                from datetime import datetime
+                month_obj = datetime.strptime(record['month'], '%Y-%m')
+                month_display = month_obj.strftime('%B %Y')
+
+                history_entries.append(
+                    f"`{month_display}` → **{display_name}** • `{record['monthly_kudos']} Kudos` • Level {record['new_level']}"
+                )
+
+            embed.description += "\n".join(history_entries)
+
+        embed.set_footer(text="Historical data is preserved permanently.")
+
+        await message.edit(content=None, embed=embed)
+
+    except discord.NotFound:
+        print("Error: History message not found.")
+    except Exception as e:
+        print(f"An error occurred while updating the history: {e}")
+
 async def _sync_roles_helper(guild: discord.Guild):
     """Synchronizes roles for all members based on their lifetime level in the database.
 
@@ -361,24 +416,45 @@ async def on_message(message: discord.Message):
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
 async def init_leaderboard(ctx: commands.Context):
-    """(Admin) Initializes the PERFORMANCE LOG in the current channel. 
-    
-    This command creates the log message and saves its ID and channel ID to the config. 
-    
+    """(Admin) Initializes the PERFORMANCE LOG in the current channel.
+
+    This command creates the log message and saves its ID and channel ID to the config.
+
     Args:
         ctx (commands.Context): The context of the command invocation.
     """
     config = load_config()
     embed = discord.Embed(title="PERFORMANCE LOG", description="Initializing performance log. Standby.", color=discord.Color(0xFFFF00))
     message = await ctx.send(embed=embed)
-    
+
     config['LEADERBOARD_CHANNEL_ID'] = ctx.channel.id
     config['LEADERBOARD_MESSAGE_ID'] = message.id
     save_config(config)
-    
+
     await ctx.message.delete()
     await update_leaderboard_message()
     await ctx.send("The performance log is now operational.", delete_after=5)
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def init_history(ctx: commands.Context):
+    """(Admin) Initializes the PERFORMANCE HISTORY message in the current channel.
+
+    This command creates the history message and saves its ID to the config.
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+    """
+    config = load_config()
+    embed = discord.Embed(title="PERFORMANCE HISTORY", description="Initializing performance history. Standby.", color=discord.Color(0x00BFFF))
+    message = await ctx.send(embed=embed)
+
+    config['HISTORY_MESSAGE_ID'] = message.id
+    save_config(config)
+
+    await ctx.message.delete()
+    await update_history_message()
+    await ctx.send("The performance history log is now operational.", delete_after=5)
 
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
@@ -610,18 +686,18 @@ async def monthly_reset_loop():
             try:
                 winner_member = await guild.fetch_member(winner_data['user_id'])
                 new_level = str(winner_data['lifetime_level'])
-                
+
                 # Update roles
                 if new_level in config['LEVEL_ROLES']:
                     new_role_id = int(config['LEVEL_ROLES'][new_level])
                     new_role = guild.get_role(new_role_id)
-                    
+
                     # Remove all other level roles
                     roles_to_remove_ids = [int(rid) for lid, rid in config['LEVEL_ROLES'].items() if lid != new_level]
                     roles_to_remove = [role for role in winner_member.roles if role.id in roles_to_remove_ids]
                     if roles_to_remove:
                         await winner_member.remove_roles(*roles_to_remove)
-                    
+
                     if new_role:
                         await winner_member.add_roles(new_role)
 
@@ -633,6 +709,7 @@ async def monthly_reset_loop():
                 print(f"An error occurred during monthly reset announcement: {e}")
 
         await update_leaderboard_message()
+        await update_history_message()
 
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))

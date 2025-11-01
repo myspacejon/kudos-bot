@@ -56,6 +56,15 @@ def setup_database():
             PRIMARY KEY (message_id, reactor_id)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS monthly_history (
+            month TEXT PRIMARY KEY,
+            user_id INTEGER,
+            monthly_kudos INTEGER,
+            new_level INTEGER,
+            timestamp TEXT
+        )
+    """)
 
     # Migration: Add new columns to existing tables if they don't exist
     try:
@@ -176,12 +185,24 @@ def monthly_reset():
     if winner:
         new_level = winner['lifetime_level'] + 1
         conn.execute('UPDATE users SET lifetime_level = ? WHERE user_id = ?', (new_level, winner['user_id']))
-    
+
+        # Save winner to monthly history
+        now = get_vancouver_now()
+        # Use previous month for the history entry (since we're resetting at start of new month)
+        from dateutil.relativedelta import relativedelta
+        last_month = now - relativedelta(months=1)
+        month_key = last_month.strftime('%Y-%m')
+
+        conn.execute(
+            'INSERT OR REPLACE INTO monthly_history (month, user_id, monthly_kudos, new_level, timestamp) VALUES (?, ?, ?, ?, ?)',
+            (month_key, winner['user_id'], winner['monthly_kudos'], new_level, now.isoformat())
+        )
+
     conn.execute('UPDATE users SET monthly_kudos = 0')
     conn.execute('DELETE FROM kudos_log') # Enforces the "Immutable Past"
     conn.commit()
     conn.close()
-    
+
     return winner
 
 def remove_kudos(creator_id, reactor_id):
@@ -340,3 +361,14 @@ def reset_daily_limits(user_id=None):
     conn.close()
 
     return affected_rows
+
+def get_monthly_history():
+    """Retrieves all monthly history records, ordered by month descending (newest first).
+
+    Returns:
+        list[sqlite3.Row]: A list of monthly history records.
+    """
+    conn = get_db_connection()
+    history = conn.execute('SELECT * FROM monthly_history ORDER BY month DESC').fetchall()
+    conn.close()
+    return history
