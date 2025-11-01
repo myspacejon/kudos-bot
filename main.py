@@ -617,6 +617,76 @@ async def add_kudos(ctx: commands.Context, member: discord.Member = None, amount
     print(f"Manual kudos: {ctx.author.display_name} added {amount} to {member.display_name}")
 
 @bot.command()
+async def fix_october_reset(ctx: commands.Context):
+    """(Owner Only) One-time fix for October 2025 reset issue.
+
+    This command:
+    - Resets all users to lifetime_level 1
+    - Sets the actual October winner to level 2
+    - Clears and rebuilds monthly_history with correct data
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+    """
+    # Check if the user is authorized
+    if ctx.author.id != 437871588864425986:
+        await ctx.send(
+            f"I'm afraid I can't do that, {ctx.author.mention}. This command is restricted to authorized personnel only.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+    await ctx.send("Initiating database repair protocol...", delete_after=10)
+
+    try:
+        import database
+        conn = database.get_db_connection()
+
+        # Reset all users to level 1
+        conn.execute('UPDATE users SET lifetime_level = 1')
+
+        # Set the actual October winner (myspace jon) to level 2
+        winner_id = 437871588864425986
+        conn.execute('UPDATE users SET lifetime_level = 2 WHERE user_id = ?', (winner_id,))
+
+        # Clear monthly_history
+        conn.execute('DELETE FROM monthly_history')
+
+        # Add correct October 2025 entry
+        from datetime import datetime
+        now = database.get_vancouver_now()
+        conn.execute(
+            'INSERT INTO monthly_history (month, user_id, monthly_kudos, new_level, timestamp) VALUES (?, ?, ?, ?, ?)',
+            ('2025-10', winner_id, 52, 2, now.isoformat())
+        )
+
+        conn.commit()
+        conn.close()
+
+        # Set system state to prevent immediate re-runs
+        today = get_vancouver_today()
+        database.set_system_state("LAST_MAINTENANCE_DATE", today)
+        database.set_system_state("LAST_MONTHLY_RESET_DATE", today)
+
+        # Sync roles to match database
+        await _sync_roles_helper(ctx.guild)
+
+        # Update the history message
+        await update_history_message()
+
+        await ctx.send(
+            "Database repair complete. October 2025 winner data has been restored correctly. Roles synchronized.",
+            delete_after=10
+        )
+        print(f"Database fixed by {ctx.author.display_name}: October 2025 winner restored")
+
+    except Exception as e:
+        await ctx.send(f"Error during repair: {e}", delete_after=10)
+        print(f"Error in fix_october_reset: {e}")
+
+@bot.command()
 async def systemtime(ctx: commands.Context):
     """Displays the current system time for debugging purposes.
 
@@ -656,7 +726,7 @@ async def daily_maintenance_loop():
     """Runs daily maintenance tasks, such as kudos decay and the Top Performer bonus."""
     config = load_config()
     today = get_vancouver_today()
-    last_run_date = config.get("LAST_MAINTENANCE_DATE")
+    last_run_date = database.get_system_state("LAST_MAINTENANCE_DATE")
 
     if last_run_date != today:
         print("--- Running daily maintenance... ---")
@@ -671,9 +741,8 @@ async def daily_maintenance_loop():
                         await channel.send(f"**Special Kudos**\n\nUnit {top_performer_member.mention} has been awarded a bonus of +{config['TOP_PERFORMER_BONUS']} Kudos for exceptional performance parameters.")
                     except discord.NotFound:
                         print(f"Daily Top Performer winner {top_performer_id} not found.")
-        
-        config["LAST_MAINTENANCE_DATE"] = today
-        save_config(config)
+
+        database.set_system_state("LAST_MAINTENANCE_DATE", today)
         print("--- Daily maintenance complete. ---")
 
 @tasks.loop(hours=1)
@@ -682,7 +751,7 @@ async def monthly_reset_loop():
     config = load_config()
     today = get_vancouver_today()
     today_obj = get_vancouver_now()
-    last_reset_date = config.get("LAST_MONTHLY_RESET_DATE")
+    last_reset_date = database.get_system_state("LAST_MONTHLY_RESET_DATE")
 
     # Only reset if it's the 1st of the month AND we haven't reset this month yet
     if today_obj.day == 1 and last_reset_date != today:
@@ -722,8 +791,7 @@ async def monthly_reset_loop():
         await update_leaderboard_message()
         await update_history_message()
 
-        config["LAST_MONTHLY_RESET_DATE"] = today
-        save_config(config)
+        database.set_system_state("LAST_MONTHLY_RESET_DATE", today)
         print("--- Monthly reset complete. ---")
 
 @tasks.loop(hours=config.get('FORUM_BUMP_HOURS', 167))

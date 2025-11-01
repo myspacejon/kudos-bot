@@ -65,6 +65,12 @@ def setup_database():
             timestamp TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS system_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
 
     # Migration: Add new columns to existing tables if they don't exist
     try:
@@ -372,3 +378,33 @@ def get_monthly_history():
     history = conn.execute('SELECT * FROM monthly_history ORDER BY month DESC').fetchall()
     conn.close()
     return history
+
+def get_system_state(key, default=None):
+    """Retrieves a system state value from the database.
+
+    Args:
+        key (str): The state key to retrieve.
+        default: The default value if key doesn't exist.
+
+    Returns:
+        str | None: The state value, or default if not found.
+    """
+    conn = get_db_connection()
+    result = conn.execute('SELECT value FROM system_state WHERE key = ?', (key,)).fetchone()
+    conn.close()
+    return result['value'] if result else default
+
+def set_system_state(key, value):
+    """Sets a system state value in the database.
+
+    Args:
+        key (str): The state key to set.
+        value (str): The value to store.
+    """
+    conn = get_db_connection()
+    conn.execute(
+        'INSERT OR REPLACE INTO system_state (key, value) VALUES (?, ?)',
+        (key, value)
+    )
+    conn.commit()
+    conn.close()
