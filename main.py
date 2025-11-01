@@ -20,8 +20,12 @@ def save_config(data):
     Args:
         data (dict): The configuration data to save.
     """
-    with open('config.json', 'w') as f:
-        json.dump(data, f, indent=4)
+    try:
+        with open('config.json', 'w') as f:
+            json.dump(data, f, indent=4)
+        print(f"Config saved successfully at {get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        print(f"ERROR: Failed to save config: {e}")
 
 config = load_config()
 
