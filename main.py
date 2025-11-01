@@ -691,7 +691,8 @@ async def monthly_reset_loop():
 
             try:
                 winner_member = await guild.fetch_member(winner_data['user_id'])
-                new_level = str(winner_data['lifetime_level'])
+                # Get the NEW level (database increments it, so winner_data has old value + 1)
+                new_level = str(winner_data['lifetime_level'] + 1)
 
                 # Update roles
                 if new_level in config['LEVEL_ROLES']:
