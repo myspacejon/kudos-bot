@@ -672,15 +672,19 @@ async def daily_maintenance_loop():
         save_config(config)
         print("--- Daily maintenance complete. ---")
 
-@tasks.loop(hours=24)
+@tasks.loop(hours=1)
 async def monthly_reset_loop():
-    """Checks daily if it's the first of the month to run the monthly reset."""
-    today = get_vancouver_now()
-    if today.day == 1:
-        print("Running monthly reset...")
+    """Checks hourly if it's the first of the month to run the monthly reset."""
+    config = load_config()
+    today = get_vancouver_today()
+    today_obj = get_vancouver_now()
+    last_reset_date = config.get("LAST_MONTHLY_RESET_DATE")
+
+    # Only reset if it's the 1st of the month AND we haven't reset this month yet
+    if today_obj.day == 1 and last_reset_date != today:
+        print("--- Running monthly reset... ---")
         winner_data = database.monthly_reset()
         if winner_data:
-            config = load_config()
             guild = bot.get_guild(int(config['GUILD_ID']))
             if not guild:
                 return
@@ -713,11 +717,15 @@ async def monthly_reset_loop():
         await update_leaderboard_message()
         await update_history_message()
 
+        config["LAST_MONTHLY_RESET_DATE"] = today
+        save_config(config)
+        print("--- Monthly reset complete. ---")
+
 @tasks.loop(hours=config.get('FORUM_BUMP_HOURS', 167))
 async def keep_forum_threads_alive():
     """Automatically bumps all threads in configured forum channels to prevent auto-archiving.
 
-    This task runs every X minutes (configured by FORUM_BUMP_MINUTES) and:
+    This task runs every X hours (configured by FORUM_BUMP_HOURS) and:
     - Bumps all active threads with ⏰ emoji
     - Unarchives and bumps all archived threads with 🔄 emoji
     - Deletes bump messages immediately after sending
