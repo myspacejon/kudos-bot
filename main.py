@@ -713,7 +713,7 @@ async def monthly_reset_loop():
         await update_leaderboard_message()
         await update_history_message()
 
-@tasks.loop(minutes=config.get('FORUM_BUMP_MINUTES', 1))
+@tasks.loop(hours=config.get('FORUM_BUMP_HOURS', 167))
 async def keep_forum_threads_alive():
     """Automatically bumps all threads in configured forum channels to prevent auto-archiving.
 
