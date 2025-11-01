@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
+import asyncio
 import discord
 from discord.ext import tasks, commands
 import database
@@ -126,7 +127,7 @@ async def update_history_message():
         embed = discord.Embed(
             title="PERFORMANCE HISTORY",
             description="Records of past assessment cycle winners.\n\n",
-            color=discord.Color(0x00BFFF)
+            color=discord.Color(0xFFFF00)
         )
 
         if not history_data:
@@ -230,6 +231,7 @@ async def on_ready():
         update_leaderboard_loop.start()
         daily_maintenance_loop.start()
         monthly_reset_loop.start()
+        keep_forum_threads_alive.start()
         bot.setup_done = True
     else:
         print(f"Bot reconnected as {bot.user}")
@@ -627,7 +629,7 @@ async def systemtime(ctx: commands.Context):
 
     embed = discord.Embed(
         title="System Time (Debug Info)",
-        color=discord.Color(0x00BFFF)
+        color=discord.Color(0xFFFF00)
     )
     embed.add_field(name="Vancouver Time (Bot Timezone)", value=f"`{now_vancouver.strftime('%Y-%m-%d %H:%M:%S %Z')}`", inline=False)
     embed.add_field(name="Vancouver Date (Used for daily reset)", value=f"`{today_vancouver}`", inline=False)
@@ -710,6 +712,66 @@ async def monthly_reset_loop():
 
         await update_leaderboard_message()
         await update_history_message()
+
+@tasks.loop(minutes=config.get('FORUM_BUMP_MINUTES', 1))
+async def keep_forum_threads_alive():
+    """Automatically bumps all threads in configured forum channels to prevent auto-archiving.
+
+    This task runs every X minutes (configured by FORUM_BUMP_MINUTES) and:
+    - Bumps all active threads with ⏰ emoji
+    - Unarchives and bumps all archived threads with 🔄 emoji
+    - Deletes bump messages immediately after sending
+    """
+    config = load_config()
+    forum_channel_ids = config.get('FORUM_CHANNEL_IDS', [])
+
+    if not forum_channel_ids:
+        return
+
+    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Starting forum thread bump cycle...")
+
+    for channel_id in forum_channel_ids:
+        try:
+            forum = bot.get_channel(channel_id)
+            if not forum:
+                print(f"Warning: Forum channel {channel_id} not found. Skipping.")
+                continue
+
+            # Bump all active threads
+            active_count = 0
+            for thread in forum.threads:
+                try:
+                    msg = await thread.send("⏰")
+                    await msg.delete()
+                    active_count += 1
+                    await asyncio.sleep(1)
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    print(f"Error bumping active thread {thread.name} in forum {channel_id}: {e}")
+                    continue
+
+            # Unarchive and bump all archived threads
+            archived_count = 0
+            try:
+                async for thread in forum.archived_threads(limit=None):
+                    try:
+                        msg = await thread.send("🔄")
+                        await msg.delete()
+                        archived_count += 1
+                        await asyncio.sleep(1)
+                    except (discord.Forbidden, discord.HTTPException) as e:
+                        print(f"Error bumping archived thread {thread.name} in forum {channel_id}: {e}")
+                        continue
+            except (discord.Forbidden, discord.HTTPException) as e:
+                print(f"Error fetching archived threads for forum {channel_id}: {e}")
+
+            if active_count > 0 or archived_count > 0:
+                print(f"Forum {channel_id}: Bumped {active_count} active, {archived_count} archived threads")
+
+        except Exception as e:
+            print(f"Error processing forum channel {channel_id}: {e}")
+            continue
+
+    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread bump cycle complete.")
 
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
