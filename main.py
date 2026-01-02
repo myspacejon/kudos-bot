@@ -799,9 +799,8 @@ async def keep_forum_threads_alive():
     """Automatically bumps all threads in configured forum channels to prevent auto-archiving.
 
     This task runs every X hours (configured by FORUM_BUMP_HOURS) and:
-    - Bumps all active threads with ⏰ emoji
-    - Unarchives and bumps all archived threads with 🔄 emoji
-    - Deletes bump messages immediately after sending
+    - Edits all threads to ensure archived=False
+    - This keeps threads alive without spamming messages
     """
     config = load_config()
     forum_channel_ids = config.get('FORUM_CHANNEL_IDS', [])
@@ -809,7 +808,7 @@ async def keep_forum_threads_alive():
     if not forum_channel_ids:
         return
 
-    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Starting forum thread bump cycle...")
+    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Starting forum thread keep-alive cycle...")
 
     for channel_id in forum_channel_ids:
         try:
@@ -818,41 +817,39 @@ async def keep_forum_threads_alive():
                 print(f"Warning: Forum channel {channel_id} not found. Skipping.")
                 continue
 
-            # Bump all active threads
+            # Process active threads (prevent archiving)
             active_count = 0
             for thread in forum.threads:
                 try:
-                    msg = await thread.send("⏰")
-                    await msg.delete()
+                    await thread.edit(archived=False)
                     active_count += 1
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(1) # Prevent rate limits
                 except (discord.Forbidden, discord.HTTPException) as e:
-                    print(f"Error bumping active thread {thread.name} in forum {channel_id}: {e}")
+                    print(f"Error editing active thread {thread.name} in forum {channel_id}: {e}")
                     continue
 
-            # Unarchive and bump all archived threads
+            # Unarchive archived threads
             archived_count = 0
             try:
                 async for thread in forum.archived_threads(limit=None):
                     try:
-                        msg = await thread.send("🔄")
-                        await msg.delete()
+                        await thread.edit(archived=False)
                         archived_count += 1
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(1) # Prevent rate limits
                     except (discord.Forbidden, discord.HTTPException) as e:
-                        print(f"Error bumping archived thread {thread.name} in forum {channel_id}: {e}")
+                        print(f"Error unarchiving thread {thread.name} in forum {channel_id}: {e}")
                         continue
             except (discord.Forbidden, discord.HTTPException) as e:
                 print(f"Error fetching archived threads for forum {channel_id}: {e}")
 
             if active_count > 0 or archived_count > 0:
-                print(f"Forum {channel_id}: Bumped {active_count} active, {archived_count} archived threads")
+                print(f"Forum {channel_id}: Refreshed {active_count} active, unarchived {archived_count} threads")
 
         except Exception as e:
             print(f"Error processing forum channel {channel_id}: {e}")
             continue
 
-    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread bump cycle complete.")
+    print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread keep-alive cycle complete.")
 
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
