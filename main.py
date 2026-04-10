@@ -747,16 +747,30 @@ async def daily_maintenance_loop():
 
 @tasks.loop(hours=1)
 async def monthly_reset_loop():
-    """Checks hourly if it's the first of the month to run the monthly reset."""
+    """Checks hourly if we have entered a new month to run the monthly reset."""
     config = load_config()
-    today = get_vancouver_today()
+    today = get_vancouver_today() # Format: 'YYYY-MM-DD'
     today_obj = get_vancouver_now()
     last_reset_date = database.get_system_state("LAST_MONTHLY_RESET_DATE")
 
-    # Only reset if it's the 1st of the month AND we haven't reset this month yet
-    if today_obj.day == 1 and last_reset_date != today:
-        print("--- Running monthly reset... ---")
+    # Extract just the Year and Month (e.g., '2024-04')
+    current_month_str = today_obj.strftime('%Y-%m')
+
+    # If the system is brand new and has no last reset date, initialize it 
+    # to today so we don't accidentally wipe current data on startup.
+    if not last_reset_date:
+        print("No previous monthly reset date found. Initializing to today.")
+        database.set_system_state("LAST_MONTHLY_RESET_DATE", today)
+        return
+
+    last_reset_month_str = last_reset_date[:7]
+
+    # If the current month is different from the month we last reset in, trigger the reset!
+    # (This covers the 1st of the month, AND catches up if the bot was offline for weeks)
+    if current_month_str != last_reset_month_str:
+        print("--- New month detected! Running catch-up monthly reset... ---")
         winner_data = database.monthly_reset()
+        
         if winner_data:
             guild = bot.get_guild(int(config['GUILD_ID']))
             if not guild:
@@ -791,6 +805,7 @@ async def monthly_reset_loop():
         await update_leaderboard_message()
         await update_history_message()
 
+        # Update the system state so it knows April has been handled
         database.set_system_state("LAST_MONTHLY_RESET_DATE", today)
         print("--- Monthly reset complete. ---")
 
