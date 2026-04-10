@@ -503,7 +503,11 @@ async def recover_missed_kudos(ctx: commands.Context, days_to_look_back: int):
     
     for channel in ctx.guild.text_channels + ctx.guild.forums:
         try:
-            async for thread in channel.archived_threads(limit=None, after=target_date):
+            # Removed the invalid 'after' keyword. Threads are yielded newest to oldest.
+            async for thread in channel.archived_threads(limit=None):
+                # If we reach threads archived before our target date, stop looking backward.
+                if thread.archive_timestamp and thread.archive_timestamp < target_date:
+                    break
                 if thread not in channels_to_scan:
                     channels_to_scan.append(thread)
         except (discord.Forbidden, AttributeError):
@@ -570,7 +574,10 @@ async def recover_daily_greetings(ctx: commands.Context, weeks: int):
     
     for channel in ctx.guild.text_channels + ctx.guild.forums:
         try:
-            async for thread in channel.archived_threads(limit=None, after=start_date):
+            # Removed the invalid 'after' keyword
+            async for thread in channel.archived_threads(limit=None):
+                if thread.archive_timestamp and thread.archive_timestamp < start_date:
+                    break
                 if thread not in channels_to_scan:
                     channels_to_scan.append(thread)
         except (discord.Forbidden, AttributeError):
@@ -632,8 +639,7 @@ async def recover_daily_greetings(ctx: commands.Context, weeks: int):
                     print(f"Error recovering daily kudos for {user_id}: {e}")
 
     await ctx.send(f"**Daily Greeting Recovery Complete.**\nScanned `{messages_scanned}` messages across `{channels_scanned}` channels and threads.\nRecovered `{recovered_count}` missed daily bot kudos.")
-
-
+    
 # ==========================================
 # TASKS
 # ==========================================
