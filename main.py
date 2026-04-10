@@ -866,5 +866,99 @@ async def keep_forum_threads_alive():
 
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread keep-alive cycle complete.")
 
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def recover_daily_greetings(ctx: commands.Context, weeks: int):
+    """(Admin) Scans for missed daily first-message bot kudos."""
+    
+    await ctx.send(f"Initiating temporal scan of the last {weeks} week(s). Grouping messages by Vancouver daily cycles to locate missed greetings. This will take a while. Standby.")
+    
+    config_kudos = load_config()
+    kudos_emoji_name = config_kudos['KUDOS_EMOJI']
+    
+    # Import pytz here if it isn't imported globally in bot.py
+    import pytz
+    VANCOUVER_TZ = pytz.timezone('America/Vancouver')
+    
+    start_date = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+    
+    # Structure: earliest_messages[date_str][user_id] = message_object
+    from collections import defaultdict
+    earliest_messages = defaultdict(dict)
+    
+    messages_scanned = 0
+    
+    # --- STEP 1: Scan and sort messages ---
+    for channel in ctx.guild.text_channels:
+        try:
+            async for message in channel.history(limit=None, after=start_date):
+                if message.author.bot:
+                    continue
+                    
+                messages_scanned += 1
+                
+                # Convert UTC to Vancouver time to figure out which "day" this belongs to
+                vancouver_time = message.created_at.astimezone(VANCOUVER_TZ)
+                date_str = vancouver_time.date().isoformat()
+                user_id = message.author.id
+                
+                # If we haven't seen a message from this user on this day, or 
+                # if THIS message is older than the one we previously saved for this day:
+                if user_id not in earliest_messages[date_str]:
+                    earliest_messages[date_str][user_id] = message
+                elif message.created_at < earliest_messages[date_str][user_id].created_at:
+                    earliest_messages[date_str][user_id] = message
+                    
+        except discord.Forbidden:
+            print(f"Skipping {channel.name}: Missing read permissions.")
+        except Exception as e:
+            print(f"Error scanning {channel.name}: {e}")
+
+    # --- STEP 2: Verify and apply missing bot reactions ---
+    recovered_count = 0
+    
+    # Get the emoji object to react with
+    kudos_emoji_obj = discord.utils.get(ctx.guild.emojis, name=kudos_emoji_name) or f":{kudos_emoji_name}:"
+    
+    for date_str, users in earliest_messages.items():
+        for user_id, message in users.items():
+            
+            # Check if the bot already reacted to this message
+            bot_reacted = False
+            for reaction in message.reactions:
+                # Check if the emoji name matches AND if the bot (me) is one of the reactors
+                if getattr(reaction.emoji, 'name', reaction.emoji) == kudos_emoji_name and reaction.me:
+                    bot_reacted = True
+                    break
+            
+            if not bot_reacted:
+                try:
+                    # Make sure the user is in the database
+                    database.get_or_create_user(user_id)
+                    
+                    # Double check the DB to ensure we didn't log it without reacting
+                    if not database.check_kudos_exists(message.id, bot.user.id):
+                        
+                        # Add the reaction
+                        await message.add_reaction(kudos_emoji_obj)
+                        
+                        # Award the point in the database
+                        database.award_daily_greeting_kudos(user_id, bot.user.id)
+                        
+                        # Log it so it can never be double-counted
+                        database.log_kudos(message.id, bot.user.id, user_id)
+                        
+                        recovered_count += 1
+                        
+                        # CRITICAL: Discord strictly limits reactions. We must pause.
+                        await asyncio.sleep(1.5)
+                        
+                except discord.Forbidden:
+                    print(f"Cannot react in {message.channel.name}. Missing permissions.")
+                except Exception as e:
+                    print(f"Error recovering daily kudos for {user_id}: {e}")
+
+    await ctx.send(f"**Daily Greeting Recovery Complete.**\nScanned `{messages_scanned}` messages across the server.\nRecovered `{recovered_count}` missed daily bot kudos.")
+
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
