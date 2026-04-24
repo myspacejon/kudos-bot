@@ -71,28 +71,6 @@ async def announce(text):
             print(f"Missing permission to send in announcement channel {channel_id}")
 
 
-async def add_all_members_to_thread(thread: discord.Thread, guild: discord.Guild):
-    """Adds every non-bot guild member to a thread if they aren't already in it.
-
-    Uses thread.fetch_members() for an accurate member list rather than the
-    cached thread.members, which only reflects explicitly-joined members.
-    """
-    try:
-        existing = {m.id for m in await thread.fetch_members()}
-    except (discord.Forbidden, discord.HTTPException):
-        return
-
-    for member in guild.members:
-        if member.bot:
-            continue
-        if member.id in existing:
-            continue
-        try:
-            await thread.add_user(member)
-            await asyncio.sleep(0.5)  # avoid rate limits
-        except (discord.Forbidden, discord.HTTPException):
-            continue
-
 
 async def handle_level_up(user_id, guild, new_level):
     """Remove old level roles, assign the new one, and announce the promotion."""
@@ -477,15 +455,6 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-
-@bot.event
-async def on_thread_create(thread: discord.Thread):
-    """Adds all guild members to a new thread immediately on creation."""
-    guild = thread.guild
-    if guild is None:
-        return
-    print(f"New thread created: {thread.name} — adding all members.")
-    await add_all_members_to_thread(thread, guild)
 
 
 # ==========================================
@@ -1020,51 +989,6 @@ async def backfill_monthly(ctx: commands.Context):
     )
 
 
-@bot.command()
-@commands.has_role(int(config['ADMIN_ROLE_ID']))
-async def populate_threads(ctx: commands.Context):
-    """(Admin) Adds all guild members to every active and archived thread in all
-    forum channels. Useful for catching up when new members join or threads are
-    created before this feature was deployed.
-    """
-    await ctx.message.delete()
-    await ctx.send("Adding all members to all threads. This may take a while. Standby.")
-
-    cfg = load_config()
-    forum_channel_ids = cfg.get('FORUM_CHANNEL_IDS', [])
-    guild = ctx.guild
-    threads_processed = 0
-
-    for channel_id in forum_channel_ids:
-        forum = bot.get_channel(channel_id)
-        if not forum:
-            continue
-
-        for thread in forum.threads:
-            await add_all_members_to_thread(thread, guild)
-            threads_processed += 1
-
-        try:
-            async for thread in forum.archived_threads(limit=None):
-                await add_all_members_to_thread(thread, guild)
-                threads_processed += 1
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-    # Also handle threads in regular text channels
-    for channel in guild.text_channels:
-        for thread in channel.threads:
-            await add_all_members_to_thread(thread, guild)
-            threads_processed += 1
-        try:
-            async for thread in channel.archived_threads(limit=None):
-                await add_all_members_to_thread(thread, guild)
-                threads_processed += 1
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-    await ctx.send(f"Done. Processed `{threads_processed}` threads.", delete_after=15)
-
 
 # ==========================================
 # TASKS
@@ -1167,8 +1091,6 @@ async def keep_forum_threads_alive():
 
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Starting forum thread keep-alive cycle...")
 
-    guild = bot.get_guild(int(config['GUILD_ID']))
-
     for channel_id in forum_channel_ids:
         try:
             forum = bot.get_channel(channel_id)
@@ -1178,8 +1100,6 @@ async def keep_forum_threads_alive():
             for thread in forum.threads:
                 try:
                     await thread.edit(archived=False)
-                    if guild:
-                        await add_all_members_to_thread(thread, guild)
                     await asyncio.sleep(1)
                 except (discord.Forbidden, discord.HTTPException):
                     continue
@@ -1188,8 +1108,6 @@ async def keep_forum_threads_alive():
                 async for thread in forum.archived_threads(limit=None):
                     try:
                         await thread.edit(archived=False)
-                        if guild:
-                            await add_all_members_to_thread(thread, guild)
                         await asyncio.sleep(1)
                     except (discord.Forbidden, discord.HTTPException):
                         continue
