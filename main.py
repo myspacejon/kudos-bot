@@ -926,6 +926,67 @@ async def migrate_lifetime_kudos(ctx: commands.Context):
     print(f"Lifetime EXP migration scan complete. Results written to {output_path}")
 
 
+@bot.command()
+async def backfill_monthly(ctx: commands.Context):
+    """(Owner) Backfills monthly_kudos_given and monthly_kudos_received from kudos_log.
+
+    Reads every transaction currently in kudos_log and increments the monthly
+    counters accordingly. Run once after deploying the new schema to catch up
+    on the current cycle's activity. Safe to run only once — kudos_log is cleared
+    on monthly reset so there is no risk of double-counting across cycles.
+    """
+    if ctx.author.id != OWNER_ID:
+        await ctx.send(fmt('unauthorized', mention=ctx.author.mention), delete_after=10)
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+    await ctx.send("Backfilling monthly counters from kudos_log. Standby.")
+
+    conn = database.get_db_connection()
+    rows = conn.execute('SELECT message_id, reactor_id, creator_id FROM kudos_log').fetchall()
+    conn.close()
+
+    if not rows:
+        await ctx.send("kudos_log is empty — nothing to backfill.")
+        return
+
+    given_counts = defaultdict(int)    # reactor_id -> kudos given this cycle
+    received_counts = defaultdict(int) # creator_id -> kudos received this cycle
+
+    for row in rows:
+        reactor_id = row['reactor_id']
+        creator_id = row['creator_id']
+        received_counts[creator_id] += 1
+        # Bot reactions count toward received only, not given
+        if reactor_id != bot.user.id:
+            given_counts[reactor_id] += 1
+
+    conn = database.get_db_connection()
+    for user_id, count in received_counts.items():
+        database.get_or_create_user(user_id)
+        conn.execute(
+            'UPDATE users SET monthly_kudos_received = monthly_kudos_received + ? WHERE user_id = ?',
+            (count, user_id)
+        )
+    for user_id, count in given_counts.items():
+        database.get_or_create_user(user_id)
+        conn.execute(
+            'UPDATE users SET monthly_kudos_given = monthly_kudos_given + ? WHERE user_id = ?',
+            (count, user_id)
+        )
+    conn.commit()
+    conn.close()
+
+    await ctx.send(
+        f"**Backfill complete.**\n"
+        f"Transactions processed: `{len(rows)}`\n"
+        f"Users updated (received): `{len(received_counts)}`\n"
+        f"Users updated (given): `{len(given_counts)}`\n\n"
+        f"Run `!init_leaderboard` in #standings to refresh the embed."
+    )
+
+
 # ==========================================
 # TASKS
 # ==========================================
