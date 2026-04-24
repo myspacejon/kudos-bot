@@ -1036,6 +1036,29 @@ async def archive_thread(ctx: commands.Context):
         await ctx.message.delete()
 
 
+@bot.command()
+async def possess(ctx: commands.Context, *, message: str = None):
+    """(Owner) Speaks through Gizmo in #general. Deletes the invoking command."""
+    if ctx.author.id != OWNER_ID:
+        await ctx.send(fmt('unauthorized', mention=ctx.author.mention), delete_after=10)
+        await ctx.message.delete()
+        return
+
+    if not message:
+        await ctx.send("Usage: `!possess some message here`", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    general = bot.get_channel(1430356101634723943)
+    if not general:
+        await ctx.send("Could not find #general.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+    await general.send(message)
+
+
 # ==========================================
 # TASKS
 # ==========================================
