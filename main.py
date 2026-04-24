@@ -71,6 +71,29 @@ async def announce(text):
             print(f"Missing permission to send in announcement channel {channel_id}")
 
 
+async def add_all_members_to_thread(thread: discord.Thread, guild: discord.Guild):
+    """Adds every non-bot guild member to a thread if they aren't already in it.
+
+    Uses thread.fetch_members() for an accurate member list rather than the
+    cached thread.members, which only reflects explicitly-joined members.
+    """
+    try:
+        existing = {m.id for m in await thread.fetch_members()}
+    except (discord.Forbidden, discord.HTTPException):
+        return
+
+    for member in guild.members:
+        if member.bot:
+            continue
+        if member.id in existing:
+            continue
+        try:
+            await thread.add_user(member)
+            await asyncio.sleep(0.5)  # avoid rate limits
+        except (discord.Forbidden, discord.HTTPException):
+            continue
+
+
 async def handle_level_up(user_id, guild, new_level):
     """Remove old level roles, assign the new one, and announce the promotion."""
     cfg = load_config()
@@ -453,6 +476,16 @@ async def on_message(message: discord.Message):
             print(f"New user detected: {message.author.display_name}. Last message date initialized.")
 
     await bot.process_commands(message)
+
+
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+    """Adds all guild members to a new thread immediately on creation."""
+    guild = thread.guild
+    if guild is None:
+        return
+    print(f"New thread created: {thread.name} — adding all members.")
+    await add_all_members_to_thread(thread, guild)
 
 
 # ==========================================
@@ -926,6 +959,113 @@ async def migrate_lifetime_kudos(ctx: commands.Context):
     print(f"Lifetime EXP migration scan complete. Results written to {output_path}")
 
 
+@bot.command()
+async def backfill_monthly(ctx: commands.Context):
+    """(Owner) Backfills monthly_kudos_given and monthly_kudos_received from kudos_log.
+
+    Reads every transaction currently in kudos_log and increments the monthly
+    counters accordingly. Run once after deploying the new schema to catch up
+    on the current cycle's activity. Safe to run only once — kudos_log is cleared
+    on monthly reset so there is no risk of double-counting across cycles.
+    """
+    if ctx.author.id != OWNER_ID:
+        await ctx.send(fmt('unauthorized', mention=ctx.author.mention), delete_after=10)
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+    await ctx.send("Backfilling monthly counters from kudos_log. Standby.")
+
+    conn = database.get_db_connection()
+    rows = conn.execute('SELECT message_id, reactor_id, creator_id FROM kudos_log').fetchall()
+    conn.close()
+
+    if not rows:
+        await ctx.send("kudos_log is empty — nothing to backfill.")
+        return
+
+    given_counts = defaultdict(int)    # reactor_id -> kudos given this cycle
+    received_counts = defaultdict(int) # creator_id -> kudos received this cycle
+
+    for row in rows:
+        reactor_id = row['reactor_id']
+        creator_id = row['creator_id']
+        received_counts[creator_id] += 1
+        # Bot reactions count toward received only, not given
+        if reactor_id != bot.user.id:
+            given_counts[reactor_id] += 1
+
+    conn = database.get_db_connection()
+    for user_id, count in received_counts.items():
+        database.get_or_create_user(user_id)
+        conn.execute(
+            'UPDATE users SET monthly_kudos_received = monthly_kudos_received + ? WHERE user_id = ?',
+            (count, user_id)
+        )
+    for user_id, count in given_counts.items():
+        database.get_or_create_user(user_id)
+        conn.execute(
+            'UPDATE users SET monthly_kudos_given = monthly_kudos_given + ? WHERE user_id = ?',
+            (count, user_id)
+        )
+    conn.commit()
+    conn.close()
+
+    await ctx.send(
+        f"**Backfill complete.**\n"
+        f"Transactions processed: `{len(rows)}`\n"
+        f"Users updated (received): `{len(received_counts)}`\n"
+        f"Users updated (given): `{len(given_counts)}`\n\n"
+        f"Run `!init_leaderboard` in #standings to refresh the embed."
+    )
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def populate_threads(ctx: commands.Context):
+    """(Admin) Adds all guild members to every active and archived thread in all
+    forum channels. Useful for catching up when new members join or threads are
+    created before this feature was deployed.
+    """
+    await ctx.message.delete()
+    await ctx.send("Adding all members to all threads. This may take a while. Standby.")
+
+    cfg = load_config()
+    forum_channel_ids = cfg.get('FORUM_CHANNEL_IDS', [])
+    guild = ctx.guild
+    threads_processed = 0
+
+    for channel_id in forum_channel_ids:
+        forum = bot.get_channel(channel_id)
+        if not forum:
+            continue
+
+        for thread in forum.threads:
+            await add_all_members_to_thread(thread, guild)
+            threads_processed += 1
+
+        try:
+            async for thread in forum.archived_threads(limit=None):
+                await add_all_members_to_thread(thread, guild)
+                threads_processed += 1
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    # Also handle threads in regular text channels
+    for channel in guild.text_channels:
+        for thread in channel.threads:
+            await add_all_members_to_thread(thread, guild)
+            threads_processed += 1
+        try:
+            async for thread in channel.archived_threads(limit=None):
+                await add_all_members_to_thread(thread, guild)
+                threads_processed += 1
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    await ctx.send(f"Done. Processed `{threads_processed}` threads.", delete_after=15)
+
+
 # ==========================================
 # TASKS
 # ==========================================
@@ -1027,6 +1167,8 @@ async def keep_forum_threads_alive():
 
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Starting forum thread keep-alive cycle...")
 
+    guild = bot.get_guild(int(config['GUILD_ID']))
+
     for channel_id in forum_channel_ids:
         try:
             forum = bot.get_channel(channel_id)
@@ -1036,6 +1178,8 @@ async def keep_forum_threads_alive():
             for thread in forum.threads:
                 try:
                     await thread.edit(archived=False)
+                    if guild:
+                        await add_all_members_to_thread(thread, guild)
                     await asyncio.sleep(1)
                 except (discord.Forbidden, discord.HTTPException):
                     continue
@@ -1044,6 +1188,8 @@ async def keep_forum_threads_alive():
                 async for thread in forum.archived_threads(limit=None):
                     try:
                         await thread.edit(archived=False)
+                        if guild:
+                            await add_all_members_to_thread(thread, guild)
                         await asyncio.sleep(1)
                     except (discord.Forbidden, discord.HTTPException):
                         continue
