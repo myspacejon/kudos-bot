@@ -1016,6 +1016,26 @@ async def remove_from_thread(ctx: commands.Context, member: discord.Member = Non
         await ctx.message.delete()
 
 
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def archive_thread(ctx: commands.Context):
+    """(Admin) Archives the current thread."""
+    if not isinstance(ctx.channel, discord.Thread):
+        await ctx.send("This command must be used inside a thread.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    try:
+        await ctx.message.delete()
+        await ctx.channel.edit(archived=True)
+    except discord.Forbidden:
+        await ctx.send("Missing permission to archive this thread.", delete_after=10)
+        await ctx.message.delete()
+    except discord.HTTPException as e:
+        await ctx.send(f"Failed to archive thread: {e}", delete_after=10)
+        await ctx.message.delete()
+
+
 # ==========================================
 # TASKS
 # ==========================================
