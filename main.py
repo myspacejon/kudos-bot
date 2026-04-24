@@ -990,6 +990,32 @@ async def backfill_monthly(ctx: commands.Context):
 
 
 
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def remove_from_thread(ctx: commands.Context, member: discord.Member = None):
+    """(Admin) Removes a member from the current thread."""
+    if not isinstance(ctx.channel, discord.Thread):
+        await ctx.send("This command must be used inside a thread.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    if member is None:
+        await ctx.send("Usage: `!remove_from_thread @user`", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    try:
+        await ctx.channel.remove_user(member)
+        await ctx.message.delete()
+        await ctx.send(f"Removed {member.mention} from this thread.", delete_after=10)
+    except discord.Forbidden:
+        await ctx.send("Missing permission to remove members from this thread.", delete_after=10)
+        await ctx.message.delete()
+    except discord.HTTPException as e:
+        await ctx.send(f"Failed to remove member: {e}", delete_after=10)
+        await ctx.message.delete()
+
+
 # ==========================================
 # TASKS
 # ==========================================
