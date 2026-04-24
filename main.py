@@ -768,5 +768,148 @@ async def keep_forum_threads_alive():
 
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread keep-alive cycle complete.")
 
+@bot.command()
+async def migrate_lifetime_kudos(ctx: commands.Context):
+    """(Owner Only) Scans all channels and threads for kudos reactions over all history
+    and outputs a lifetime EXP tally as JSON. Does not write to the database.
+
+    Usage: !migrate_lifetime_kudos
+
+    Args:
+        ctx (commands.Context): The context of the command invocation.
+    """
+    if ctx.author.id != 437871588864425986:
+        await ctx.send(
+            f"I'm afraid I can't do that, {ctx.author.mention}. This command is restricted to authorized personnel only.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    await ctx.message.delete()
+    await ctx.send("Initiating lifetime EXP migration scan over all history. Scanning all channels and threads. This will take a while. Standby.")
+
+    config_data = load_config()
+    kudos_emoji_name = config_data['KUDOS_EMOJI']
+
+    exp_totals = defaultdict(lambda: {'lifetime_exp': 0, 'kudos_given': 0, 'kudos_received': 0})
+    seen_pairs = set()
+
+    messages_scanned = 0
+    kudos_counted = 0
+
+    async def scan_messages(source):
+        nonlocal messages_scanned, kudos_counted
+        try:
+            async for message in source.history(limit=None):
+                messages_scanned += 1
+                creator = message.author
+
+                if creator.bot:
+                    continue
+
+                for reaction in message.reactions:
+                    if getattr(reaction.emoji, 'name', reaction.emoji) != kudos_emoji_name:
+                        continue
+
+                    async for reactor in reaction.users():
+                        if reactor.bot:
+                            continue
+                        if reactor.id == creator.id:
+                            continue
+
+                        pair = (message.id, reactor.id)
+                        if pair in seen_pairs:
+                            continue
+                        seen_pairs.add(pair)
+
+                        exp_totals[creator.id]['lifetime_exp'] += 2
+                        exp_totals[creator.id]['kudos_received'] += 1
+                        exp_totals[reactor.id]['lifetime_exp'] += 1
+                        exp_totals[reactor.id]['kudos_given'] += 1
+                        kudos_counted += 1
+
+        except discord.Forbidden:
+            print(f"Skipping {source}: Missing read permissions.")
+        except Exception as e:
+            print(f"Error scanning {source}: {e}")
+
+    # Scan all text channels and their threads
+    for channel in ctx.guild.text_channels:
+        await scan_messages(channel)
+
+        for thread in channel.threads:
+            await scan_messages(thread)
+
+        try:
+            async for thread in channel.archived_threads(limit=None):
+                await scan_messages(thread)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            print(f"Could not fetch archived threads for {channel.name}: {e}")
+
+    # Scan forum channels
+    for channel_id in config_data.get('FORUM_CHANNEL_IDS', []):
+        forum = bot.get_channel(channel_id)
+        if not forum:
+            continue
+
+        for thread in forum.threads:
+            await scan_messages(thread)
+
+        try:
+            async for thread in forum.archived_threads(limit=None):
+                await scan_messages(thread)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            print(f"Could not fetch archived threads for forum {channel_id}: {e}")
+
+    # Build output
+    guild = ctx.guild
+    output = {
+        "scan_summary": {
+            "messages_scanned": messages_scanned,
+            "kudos_events_counted": kudos_counted,
+            "unique_users": len(exp_totals)
+        },
+        "users": {}
+    }
+
+    for user_id, data in sorted(exp_totals.items(), key=lambda x: x[1]['lifetime_exp'], reverse=True):
+        member = guild.get_member(user_id)
+        display_name = member.display_name if member else f"Unknown ({user_id})"
+        calculated_level = database.calculate_level(data['lifetime_exp'])
+        output["users"][str(user_id)] = {
+            "display_name": display_name,
+            "lifetime_exp": data['lifetime_exp'],
+            "kudos_received": data['kudos_received'],
+            "kudos_given": data['kudos_given'],
+            "calculated_level": calculated_level
+        }
+
+    # Write JSON to file as backup
+    output_path = "/data/lifetime_exp_migration.json"
+    with open(output_path, 'w') as f:
+        json.dump(output, f, indent=4)
+
+    # Send summary header
+    header = (
+        f"**Migration Scan Complete.**\n"
+        f"Messages scanned: `{messages_scanned}`\n"
+        f"Kudos events counted: `{kudos_counted}`\n"
+        f"Unique users: `{len(exp_totals)}`\n\n"
+    )
+    await ctx.send(header)
+
+    # Split JSON into chunks due to Discord 2000 char limit
+    json_str = json.dumps(output, indent=4)
+    chunk_size = 1900
+    chunks = [json_str[i:i+chunk_size] for i in range(0, len(json_str), chunk_size)]
+
+    for chunk in chunks:
+        await ctx.send(f"```json\n{chunk}\n```")
+        await asyncio.sleep(0.5)
+
+    print(f"Lifetime EXP migration scan complete. Results written to {output_path}")
+
+
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
