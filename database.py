@@ -8,6 +8,22 @@ DB_FILE = "/data/kudos_bot.db"
 # Timezone configuration for America/Vancouver (PST/PDT)
 VANCOUVER_TZ = pytz.timezone('America/Vancouver')
 
+def calculate_level(lifetime_exp):
+    """Calculates the correct level for a given lifetime EXP total.
+
+    Args:
+        lifetime_exp (int): The user's total lifetime EXP.
+
+    Returns:
+        int: The calculated level.
+    """
+    thresholds = [0, 20, 50, 80, 130, 210, 340, 550, 890, 1440, 2330]
+    level = 1
+    for i, threshold in enumerate(thresholds):
+        if lifetime_exp >= threshold:
+            level = i + 1
+    return level
+
 def get_vancouver_now():
     """Returns the current datetime in America/Vancouver timezone.
 
