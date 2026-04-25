@@ -21,6 +21,11 @@ OWNER_ID = 437871588864425986
 PROJECT_FORUM_ID = 1433589490953359360
 NUDGE_WINDOW_MIN_DAYS = 2
 NUDGE_WINDOW_MAX_DAYS = 5
+# Default watched channels seeded on first deploy — managed via !watch and !window commands
+DEFAULT_WATCHED_CHANNELS = {
+    1430356101634723943: 12,  # #general
+    1497399084045303878: 1,   # #mod-gizmo-test
+}
 
 # Chatbot cooldown — tracked in memory, resets on restart
 _chatbot_cooldown_until: datetime | None = None
@@ -172,9 +177,9 @@ def set_chatbot_cooldown():
     print(f"Chatbot cooldown set for {seconds}s.")
 
 
-async def fetch_todays_messages(channel, bot_user):
-    """Fetches messages from the last 12 hours from a channel, oldest first."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+async def fetch_todays_messages(channel, bot_user, context_hours=12):
+    """Fetches messages from the last context_hours from a channel, oldest first."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=context_hours)
     messages = []
     try:
         async for msg in channel.history(limit=200):
@@ -811,6 +816,13 @@ async def on_ready():
         else:
             print("ERROR: Could not find server. Role sync skipped.")
 
+        # Seed default watched channels if table is empty
+        existing = database.get_watched_channels()
+        if not existing:
+            for cid, hours in DEFAULT_WATCHED_CHANNELS.items():
+                database.set_channel_window(cid, hours)
+            print(f"Seeded {len(DEFAULT_WATCHED_CHANNELS)} default watched channel(s).")
+
         update_leaderboard_loop.start()
         daily_maintenance_loop.start()
         monthly_reset_loop.start()
@@ -983,8 +995,8 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
     # --- Chatbot ---
-    CHATBOT_CHANNELS = {1430356101634723943, 1497399084045303878}
-    if chatbot_is_enabled() and message.channel.id in CHATBOT_CHANNELS:
+    watched = database.get_watched_channels()
+    if chatbot_is_enabled() and message.channel.id in watched:
         # Check for explicit triggers first so we can bypass cooldown if directly involved
         bot_mentioned_pre = bot.user in message.mentions
         name_mentioned_pre = 'gizmo' in message.content.lower()
@@ -1000,11 +1012,12 @@ async def on_message(message: discord.Message):
         if not explicit_trigger_pre and not chatbot_is_ready():
             await bot.process_commands(message)
             return
-    if chatbot_is_enabled() and message.channel.id in CHATBOT_CHANNELS:
+    if chatbot_is_enabled() and message.channel.id in watched:
         # Determine if Gizmo is directly involved
         explicit_trigger = explicit_trigger_pre
 
-        channel_messages = await fetch_todays_messages(message.channel, bot.user)
+        context_hours = watched.get(message.channel.id, 12)
+        channel_messages = await fetch_todays_messages(message.channel, bot.user, context_hours=context_hours)
 
         # If no explicit trigger, run cheap "is this for me?" pass
         directly_involved = explicit_trigger
@@ -1683,6 +1696,72 @@ async def possess(ctx: commands.Context, channel: discord.TextChannel = None, *,
     await channel.send(message)
 
 
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def watch(ctx: commands.Context, channel: discord.TextChannel = None):
+    """(Admin) Toggles watching a channel for Gizmo chatbot activity.
+
+    Usage: !watch #channel
+    """
+    if channel is None:
+        await ctx.send("Usage: `!watch #channel`", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    now_watching = database.toggle_watched_channel(channel.id)
+    await ctx.message.delete()
+    if now_watching:
+        await ctx.send(
+            f"Affirmative. Now monitoring {channel.mention} with a default 12-hour context window. "
+            f"Use `!window {channel.mention} <hours>` to adjust.",
+            delete_after=15
+        )
+    else:
+        await ctx.send(
+            f"Acknowledged. {channel.mention} has been removed from active monitoring.",
+            delete_after=10
+        )
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def window(ctx: commands.Context, channel: discord.TextChannel = None, hours: int = None):
+    """(Admin) Sets the context window (in hours) for a watched channel.
+
+    Usage: !window #channel 10
+    """
+    if channel is None or hours is None or hours <= 0:
+        await ctx.send("Usage: `!window #channel <hours>`", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    database.set_channel_window(channel.id, hours)
+    await ctx.message.delete()
+    await ctx.send(
+        f"Affirmative. Context window for {channel.mention} set to `{hours}` hour(s).",
+        delete_after=10
+    )
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def watched(ctx: commands.Context):
+    """(Admin) Lists all currently watched channels and their context windows."""
+    channels = database.get_watched_channels()
+    await ctx.message.delete()
+    if not channels:
+        await ctx.send("No channels are currently being monitored.", delete_after=10)
+        return
+
+    lines = []
+    for cid, hours in channels.items():
+        ch = bot.get_channel(cid)
+        name = ch.mention if ch else f"`{cid}`"
+        lines.append(f"{name} — `{hours}h` context window")
+
+    await ctx.send("**Monitored Channels:**\n" + "\n".join(lines), delete_after=30)
+
+
 # ==========================================
 # TASKS
 # ==========================================
@@ -1813,7 +1892,7 @@ async def keep_forum_threads_alive():
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread keep-alive cycle complete.")
 
 
-@tasks.loop(hours=6)
+@tasks.loop(hours=48)
 async def gizmo_unprompted_loop():
     """Every 6 hours, if the chatbot is enabled and a human has sent a message
     in a chatbot channel within the last 6 hours, Gizmo sends an unprompted message.
@@ -1822,10 +1901,10 @@ async def gizmo_unprompted_loop():
     if not chatbot_is_enabled():
         return
 
-    CHATBOT_CHANNELS = {1430356101634723943, 1497399084045303878}
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+    watched = database.get_watched_channels()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
 
-    for channel_id in CHATBOT_CHANNELS:
+    for channel_id in watched:
         channel = bot.get_channel(channel_id)
         if not channel:
             continue
