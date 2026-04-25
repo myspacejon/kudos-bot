@@ -566,7 +566,7 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
     # --- Chatbot ---
-    if chatbot_is_enabled() and chatbot_is_ready():
+    if chatbot_is_enabled() and chatbot_is_ready() and message.channel.id == 1430356101634723943:
         # Determine if Gizmo is directly involved
         bot_mentioned = bot.user in message.mentions
         name_mentioned = 'gizmo' in message.content.lower()
