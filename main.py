@@ -17,6 +17,9 @@ from database import get_vancouver_now, get_vancouver_today
 VANCOUVER_TZ = pytz.timezone('America/Vancouver')
 
 OWNER_ID = 437871588864425986
+PROJECT_FORUM_ID = 1433589490953359360
+NUDGE_WINDOW_MIN_DAYS = 2
+NUDGE_WINDOW_MAX_DAYS = 5
 
 # Chatbot cooldown — tracked in memory, resets on restart
 _chatbot_cooldown_until: datetime | None = None
@@ -74,6 +77,7 @@ You will be shown recent messages from the channel today and told whether the la
 - If someone mentions you by name, @s you, or replies to you: strongly consider responding
 - If the conversation involves something you find interesting — a project update, a creative decision, a problem someone is working through — feel free to join in even if not directly addressed
 - Do not volunteer opinions or observations out of nowhere. Only share a view if the conversation has genuinely opened the door for it
+- Do not bring up kudos or the kudos system unprompted. You care about it deeply but you do not announce this. Only discuss it if someone else raises it first.
 - Keep replies short — 1 to 3 sentences maximum
 - You may occasionally ask a follow-up question if you are genuinely curious. Do not do this every time.
 - Do not explain your reasoning
@@ -181,11 +185,160 @@ async def fetch_todays_messages(channel, bot_user):
     return messages
 
 
+async def fetch_thread_owner_messages(thread):
+    """Fetches messages from a thread authored by the thread owner only.
+
+    Filters to MessageType.default and MessageType.reply, skipping bots and
+    system messages (e.g. join events from The Threadening).
+    Returns list of (created_at, content) tuples, oldest first.
+    """
+    owner_messages = []
+    try:
+        async for msg in thread.history(limit=200, oldest_first=False):
+            if msg.type not in (discord.MessageType.default, discord.MessageType.reply):
+                continue
+            if msg.author.bot:
+                continue
+            if msg.author.id != thread.owner_id:
+                continue
+            owner_messages.append((msg.created_at, msg.content))
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    owner_messages.reverse()  # oldest first
+    return owner_messages
+
+
+async def summarise_thread_messages(thread_name, messages):
+    """Calls Claude to produce a 2-3 sentence summary of thread owner messages."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key or not messages:
+        return None
+
+    combined = "\n".join(f"[{ts.strftime('%Y-%m-%d')}] {content}" for ts, content in messages)
+    payload = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 150,
+        "system": "You summarise game dev project update threads. Be factual and brief. 2-3 sentences max. Focus on: what the project is, where it currently stands, and what was most recently mentioned.",
+        "messages": [{"role": "user", "content": f"Thread: {thread_name}\n\n{combined}"}]
+    }
+    try:
+        print(f"[NudgeSystem] Summarising thread '{thread_name}' ({len(messages)} owner message(s))...")
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload
+            ) as resp:
+                if resp.status != 200:
+                    print(f"[NudgeSystem] API error summarising '{thread_name}': {resp.status}")
+                    return None
+                data = await resp.json()
+                return data["content"][0]["text"].strip()
+    except Exception as e:
+        print(f"[NudgeSystem] Error summarising thread '{thread_name}': {e}")
+        return None
+
+
+async def get_nudge_thread_summaries():
+    """Scans the project forum for threads in the 2-5 day nudge window.
+
+    For qualifying threads, fetches owner-only messages (first 2, up to 3 from
+    the middle, last 2) and generates a fresh summary. Returns up to 3 summaries
+    as a list of (thread_name, summary) tuples.
+
+    The nudge window targets threads whose last real (non-bot, non-system) message
+    falls between NUDGE_WINDOW_MIN_DAYS and NUDGE_WINDOW_MAX_DAYS ago — active
+    enough to be relevant, quiet enough to warrant a gentle check-in.
+    """
+    forum = bot.get_channel(PROJECT_FORUM_ID)
+    if not forum:
+        return []
+
+    now = datetime.now(timezone.utc)
+    min_cutoff = now - timedelta(days=NUDGE_WINDOW_MAX_DAYS)
+    max_cutoff = now - timedelta(days=NUDGE_WINDOW_MIN_DAYS)
+
+    qualifying = []
+
+    all_threads = list(forum.threads)
+    try:
+        async for thread in forum.archived_threads(limit=50):
+            all_threads.append(thread)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    for thread in all_threads:
+        try:
+            # Find the last real non-bot message to determine activity window
+            last_real = None
+            async for msg in thread.history(limit=20):
+                if msg.type not in (discord.MessageType.default, discord.MessageType.reply):
+                    continue
+                if msg.author.bot:
+                    continue
+                last_real = msg.created_at
+                break
+
+            if last_real is None:
+                continue
+            if not (min_cutoff <= last_real <= max_cutoff):
+                continue
+
+            qualifying.append(thread)
+        except (discord.Forbidden, discord.HTTPException):
+            continue
+
+    if not qualifying:
+        print(f"[NudgeSystem] No threads in the {NUDGE_WINDOW_MIN_DAYS}-{NUDGE_WINDOW_MAX_DAYS} day window.")
+        return []
+
+    print(f"[NudgeSystem] {len(qualifying)} qualifying thread(s) found: {[t.name for t in qualifying]}")
+    selected = random.sample(qualifying, min(3, len(qualifying)))
+    print(f"[NudgeSystem] Selected for context: {[t.name for t in selected]}")
+    summaries = []
+
+    for thread in selected:
+        owner_msgs = await fetch_thread_owner_messages(thread)
+        if not owner_msgs:
+            continue
+
+        # Build: first 2 + up to 3 from middle + last 2
+        if len(owner_msgs) <= 4:
+            selected_msgs = owner_msgs
+        else:
+            first = owner_msgs[:2]
+            last = owner_msgs[-2:]
+            middle = owner_msgs[2:-2]
+            mid_sample = random.sample(middle, min(3, len(middle)))
+            mid_sample.sort(key=lambda x: x[0])
+            selected_msgs = first + mid_sample + last
+
+        summary = await summarise_thread_messages(thread.name, selected_msgs)
+        if summary:
+            summaries.append((thread.name, summary))
+            print(f"[NudgeSystem] Summary for '{thread.name}': {summary}")
+        else:
+            print(f"[NudgeSystem] Failed to summarise '{thread.name}'.")
+
+    print(f"[NudgeSystem] {len(summaries)} summary(ies) ready for context.")
+    return summaries
+
+
 async def query_gizmo(channel_messages: list[str], latest_message: str,
-                      author_name: str, directly_involved: bool) -> str:
+                      author_name: str, directly_involved: bool,
+                      project_summaries: list[tuple] | None = None) -> str:
     """Calls the Claude API and returns Gizmo's raw response string.
 
     Response will be one of: SILENT, KUDOS, REPLY: <text>, or KUDOS\nREPLY: <text>.
+
+    Args:
+        project_summaries: Optional list of (thread_name, summary) tuples for
+            project threads in the nudge window.
     """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
@@ -199,10 +352,21 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         "This message does not directly involve you. Only respond if you have something genuinely worth adding."
     )
 
+    project_block = ""
+    if project_summaries:
+        print(f"[Gizmo] Injecting {len(project_summaries)} project summary(ies) into context.")
+        lines = "\n".join(f'- [{name}]: {summary}' for name, summary in project_summaries)
+        project_block = (
+            f"\n\nPROJECT THREADS (members who may appreciate a gentle check-in — "
+            f"these projects have gone quiet recently):\n{lines}\n"
+            f"You may reference one of these naturally if the conversation allows. "
+            f"Do not force it. Do not mention multiple at once."
+        )
+
     user_content = (
         f"Recent messages in the channel today:\n{context_block}\n\n"
         f"Latest message from {author_name}:\n{latest_message}\n\n"
-        f"{involvement}"
+        f"{involvement}{project_block}"
     )
 
     payload = {
@@ -1458,18 +1622,21 @@ async def gizmo_unprompted_loop():
             prompt = (
                 "You have not spoken in a while. The channel has been quiet. "
                 "Send a short unprompted message to engage the community. "
-                "It could be an observation, a question, a dry remark, something about Pikmin, "
+                "It could be an observation about game dev, a question, a dry remark, "
                 "or anything that feels natural for you. Keep it to 1-2 sentences. "
                 "Do not reference that you haven't spoken in a while. "
+                "Do not mention kudos or the kudos system. "
                 "Do not mention Pikmin. "
                 "Use the REPLY: format only."
             )
 
+            project_summaries = await get_nudge_thread_summaries()
             response = await query_gizmo(
                 channel_messages,
                 prompt,
                 "System",
-                True
+                True,
+                project_summaries=project_summaries
             )
 
             if response and "REPLY:" in response:
