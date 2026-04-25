@@ -165,13 +165,12 @@ def set_chatbot_cooldown():
 
 
 async def fetch_todays_messages(channel, bot_user):
-    """Fetches all messages sent today (Vancouver time) from a channel, oldest first."""
-    today = get_vancouver_today()
+    """Fetches messages from the last 12 hours from a channel, oldest first."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
     messages = []
     try:
         async for msg in channel.history(limit=200):
-            msg_date = msg.created_at.astimezone(VANCOUVER_TZ).date().isoformat()
-            if msg_date < today:
+            if msg.created_at < cutoff:
                 break
             name = "Gizmo" if msg.author.id == bot_user.id else msg.author.display_name
             cleaned = msg.content.replace("pikmin", "").replace("Pikmin", "").replace("PIKMIN", "")
