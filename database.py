@@ -115,6 +115,12 @@ def setup_database():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS watched_channels (
+            channel_id INTEGER PRIMARY KEY,
+            context_hours INTEGER DEFAULT 12
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS thread_summaries (
             thread_id INTEGER PRIMARY KEY,
             thread_name TEXT,
@@ -402,6 +408,41 @@ def get_monthly_history():
     history = conn.execute('SELECT * FROM monthly_history ORDER BY month DESC').fetchall()
     conn.close()
     return history
+
+
+def get_watched_channels():
+    """Returns all watched channels as a dict of {channel_id: context_hours}."""
+    conn = get_db_connection()
+    rows = conn.execute('SELECT channel_id, context_hours FROM watched_channels').fetchall()
+    conn.close()
+    return {row['channel_id']: row['context_hours'] for row in rows}
+
+
+def toggle_watched_channel(channel_id, default_hours=12):
+    """Toggles a channel in the watched list. Returns True if now watching, False if removed."""
+    conn = get_db_connection()
+    existing = conn.execute('SELECT 1 FROM watched_channels WHERE channel_id = ?', (channel_id,)).fetchone()
+    if existing:
+        conn.execute('DELETE FROM watched_channels WHERE channel_id = ?', (channel_id,))
+        conn.commit()
+        conn.close()
+        return False
+    else:
+        conn.execute('INSERT INTO watched_channels (channel_id, context_hours) VALUES (?, ?)', (channel_id, default_hours))
+        conn.commit()
+        conn.close()
+        return True
+
+
+def set_channel_window(channel_id, hours):
+    """Sets the context window for a watched channel. Adds it if not already watched."""
+    conn = get_db_connection()
+    conn.execute(
+        'INSERT OR REPLACE INTO watched_channels (channel_id, context_hours) VALUES (?, ?)',
+        (channel_id, hours)
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_thread_summary(thread_id):
