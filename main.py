@@ -187,7 +187,7 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     )
 
     payload = {
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 1000,
         "system": GIZMO_SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_content}]
