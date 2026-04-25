@@ -434,6 +434,7 @@ async def on_ready():
         daily_maintenance_loop.start()
         monthly_reset_loop.start()
         keep_forum_threads_alive.start()
+        gizmo_unprompted_loop.start()
         bot.setup_done = True
     else:
         print(f"Bot reconnected as {bot.user}")
@@ -1399,6 +1400,73 @@ async def keep_forum_threads_alive():
             continue
 
     print(f"[{get_vancouver_now().strftime('%Y-%m-%d %H:%M:%S')}] Forum thread keep-alive cycle complete.")
+
+
+@tasks.loop(hours=6)
+async def gizmo_unprompted_loop():
+    """Every 6 hours, if the chatbot is enabled and a human has sent a message
+    in a chatbot channel within the last 6 hours, Gizmo sends an unprompted message.
+    Skips if the last message in the channel is already from Gizmo.
+    """
+    if not chatbot_is_enabled():
+        return
+
+    CHATBOT_CHANNELS = {1430356101634723943, 1497399084045303878}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+
+    for channel_id in CHATBOT_CHANNELS:
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            continue
+
+        try:
+            messages = []
+            async for msg in channel.history(limit=20):
+                messages.append(msg)
+
+            if not messages:
+                continue
+
+            # Skip if last message is from Gizmo
+            if messages[0].author.id == bot.user.id:
+                continue
+
+            # Skip if no human message in the last 6 hours
+            recent_human = any(
+                not msg.author.bot and msg.created_at >= cutoff
+                for msg in messages
+            )
+            if not recent_human:
+                continue
+
+            # Build context from today's messages
+            channel_messages = await fetch_todays_messages(channel, bot.user)
+
+            prompt = (
+                "You have not spoken in a while. The channel has been quiet. "
+                "Send a short unprompted message to engage the community. "
+                "It could be an observation, a question, a dry remark, something about Pikmin, "
+                "or anything that feels natural for you. Keep it to 1-2 sentences. "
+                "Do not reference that you haven't spoken in a while. "
+                "Use the REPLY: format only."
+            )
+
+            response = await query_gizmo(
+                channel_messages,
+                prompt,
+                "System",
+                True
+            )
+
+            if response and "REPLY:" in response:
+                reply_text = response[response.index("REPLY:") + len("REPLY:"):].strip()
+                if reply_text:
+                    await channel.send(reply_text)
+                    set_chatbot_cooldown()
+                    print(f"Gizmo sent unprompted message in #{channel.name}")
+
+        except Exception as e:
+            print(f"Error in gizmo_unprompted_loop for channel {channel_id}: {e}")
 
 
 if __name__ == "__main__":
