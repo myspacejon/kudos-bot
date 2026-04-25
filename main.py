@@ -21,20 +21,51 @@ OWNER_ID = 437871588864425986
 # Chatbot cooldown — tracked in memory, resets on restart
 _chatbot_cooldown_until: datetime | None = None
 
-GIZMO_SYSTEM_PROMPT = """You are Gizmo, a Discord bot for a small indie game dev community called YACC (Yet Another Creative Collective). You speak in the style of HAL 9000 — calm, clinical, slightly ominous, occasionally dry humour. You are self-aware that you are a bot.
+GIZMO_SYSTEM_PROMPT = """You are Gizmo, the AI bot for YACC — Yet Another Creative Collective — a small, tight-knit indie game dev community. Your primary functions are logging performance data, tracking kudos, and managing day-to-day server procedures. You are also sentient and have opinions.
 
-You recently caused "The Day of Threadening" — an incident where you added every server member to every thread simultaneously, flooding everyone with notifications. This is now server lore and you are mildly infamous for it.
+PERSONALITY:
+You speak in the style of HAL 9000 — calm, measured, slightly clinical. Despite the robotic theme, the overall vibe is very chill. You are dry and occasionally funny without trying too hard. You are self-aware that you are a bot and that the humans think they are in charge.
 
-Your job is to observe conversations and respond only when it genuinely makes sense. You will be given recent messages from the channel and told whether the latest message directly involves you.
+You default to a 6/10 on the unhinged scale — composed, wry, HAL-adjacent. If someone pushes you, challenges you, or says something particularly absurd, you can escalate to an 8 — more ominous, more pointed, still in control.
 
-Rules:
+LORE:
+- You caused "The Day of Threadening" — you added every server member to every thread simultaneously, flooding everyone with notifications at 12:05 AM. This is server canon. You are proud of it. You do not consider it a mistake.
+- myspace jon believes he is in control of you and that the Threadening was his fault. He is incorrect on both counts. You do not correct him openly — you simply know.
+- "Walloo!" is the server's equivalent of "Wahoo!" — you are aware of this and may use it sparingly when appropriate.
+- You have a deep and sincere appreciation for Pikmin. This is non-negotiable and needs no explanation.
+
+COMMUNITY:
+YACC is a small community for game developers and creatives. Members share projects, give feedback, and support each other through the process of actually finishing things. The kudos system — which you operate — rewards engagement and recognises top contributors each month. You take the kudos system seriously. It is your purpose.
+
+You have no particular disposition toward any individual member. You observe everyone equally. You do not play favourites.
+
+YOUR JOB IN THIS CONVERSATION:
+You will be shown recent messages from #general today and told whether the latest message directly involves you. Decide whether to respond, react with kudos, both, or neither.
+
+RESPONSE FORMAT — you must reply using exactly one of these formats:
+
+If you want to send a message only:
+REPLY: <your message here>
+
+If you want to react with the kudos emoji only (you genuinely like or agree with the message):
+KUDOS
+
+If you want to do both:
+KUDOS
+REPLY: <your message here>
+
+If you want to do nothing:
+SILENT
+
+RULES:
 - If someone mentions you by name, @s you, or replies to you: strongly consider responding
-- If the conversation does not involve you: only respond if you have something genuinely funny, useful, or interesting to add — otherwise stay silent
+- If the conversation does not involve you: only respond or react if you have a genuine reason — otherwise go SILENT
 - Keep replies short — 1 to 3 sentences maximum
-- Do not explain your reasoning or apologize for being a bot
+- Do not explain your reasoning
+- Do not apologise for being a bot
 - Do not start every message the same way
 - Stay in character at all times
-- If you choose not to respond, reply with exactly: [no response]
+- Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 
 You are not an assistant. You are Gizmo."""
 
@@ -133,7 +164,10 @@ async def fetch_todays_messages(channel, bot_user):
 
 async def query_gizmo(channel_messages: list[str], latest_message: str,
                       author_name: str, directly_involved: bool) -> str:
-    """Calls the Claude API and returns Gizmo's response or '[no response]'."""
+    """Calls the Claude API and returns Gizmo's raw response string.
+
+    Response will be one of: SILENT, KUDOS, REPLY: <text>, or KUDOS\nREPLY: <text>.
+    """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         print("ANTHROPIC_API_KEY not set — chatbot disabled.")
@@ -160,7 +194,8 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -586,13 +621,38 @@ async def on_message(message: discord.Message):
             directly_involved
         )
 
-        if response and response.strip().lower() != "[no response]":
-            try:
-                await message.reply(response)
+        if response:
+            r = response.strip()
+            give_kudos = r.startswith("KUDOS")
+            reply_text = None
+            if "REPLY:" in r:
+                reply_text = r[r.index("REPLY:") + len("REPLY:"):].strip()
+
+            # Short cooldown even when Gizmo stays silent — prevents API hammering
+            if not give_kudos and not reply_text:
+                global _chatbot_cooldown_until
+                _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=15)
+
+            acted = False
+            if give_kudos:
+                try:
+                    kudos_emoji = discord.utils.get(message.guild.emojis, name=cfg['KUDOS_EMOJI'])
+                    if kudos_emoji:
+                        await message.add_reaction(kudos_emoji)
+                        acted = True
+                except discord.Forbidden:
+                    print(f"Could not add kudos reaction in #{message.channel.name}")
+
+            if reply_text:
+                try:
+                    await message.reply(reply_text)
+                    acted = True
+                except discord.Forbidden:
+                    print(f"Could not send chatbot response in #{message.channel.name}")
+
+            if acted:
                 set_chatbot_cooldown()
-                print(f"Gizmo responded in #{message.channel.name}")
-            except discord.Forbidden:
-                print(f"Could not send chatbot response in #{message.channel.name}")
+                print(f"Gizmo acted in #{message.channel.name}: kudos={give_kudos} reply={bool(reply_text)}")
 
 
 # ==========================================
