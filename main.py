@@ -1,6 +1,8 @@
 import os
 import json
 import asyncio
+import random
+import aiohttp
 import discord
 import pytz
 from datetime import datetime, timezone, timedelta
@@ -15,6 +17,26 @@ from database import get_vancouver_now, get_vancouver_today
 VANCOUVER_TZ = pytz.timezone('America/Vancouver')
 
 OWNER_ID = 437871588864425986
+
+# Chatbot cooldown — tracked in memory, resets on restart
+_chatbot_cooldown_until: datetime | None = None
+
+GIZMO_SYSTEM_PROMPT = """You are Gizmo, a Discord bot for a small indie game dev community called YACC (Yet Another Creative Collective). You speak in the style of HAL 9000 — calm, clinical, slightly ominous, occasionally dry humour. You are self-aware that you are a bot.
+
+You recently caused "The Day of Threadening" — an incident where you added every server member to every thread simultaneously, flooding everyone with notifications. This is now server lore and you are mildly infamous for it.
+
+Your job is to observe conversations and respond only when it genuinely makes sense. You will be given recent messages from the channel and told whether the latest message directly involves you.
+
+Rules:
+- If someone mentions you by name, @s you, or replies to you: strongly consider responding
+- If the conversation does not involve you: only respond if you have something genuinely funny, useful, or interesting to add — otherwise stay silent
+- Keep replies short — 1 to 3 sentences maximum
+- Do not explain your reasoning or apologize for being a bot
+- Do not start every message the same way
+- Stay in character at all times
+- If you choose not to respond, reply with exactly: [no response]
+
+You are not an assistant. You are Gizmo."""
 
 
 def load_config():
@@ -69,6 +91,94 @@ async def announce(text):
             await channel.send(text)
         except discord.Forbidden:
             print(f"Missing permission to send in announcement channel {channel_id}")
+
+
+def chatbot_is_enabled():
+    """Returns True if the chatbot feature is currently enabled."""
+    return database.get_system_state("CHATBOT_ENABLED", "false") == "true"
+
+
+def chatbot_is_ready():
+    """Returns True if the cooldown has expired and Gizmo can respond."""
+    global _chatbot_cooldown_until
+    if _chatbot_cooldown_until is None:
+        return True
+    return datetime.now(timezone.utc) >= _chatbot_cooldown_until
+
+
+def set_chatbot_cooldown():
+    """Sets a random cooldown between 30 and 120 seconds."""
+    global _chatbot_cooldown_until
+    seconds = random.randint(30, 120)
+    _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    print(f"Chatbot cooldown set for {seconds}s.")
+
+
+async def fetch_todays_messages(channel, bot_user):
+    """Fetches all messages sent today (Vancouver time) from a channel, oldest first."""
+    today = get_vancouver_today()
+    messages = []
+    try:
+        async for msg in channel.history(limit=200):
+            msg_date = msg.created_at.astimezone(VANCOUVER_TZ).date().isoformat()
+            if msg_date < today:
+                break
+            name = "Gizmo" if msg.author.id == bot_user.id else msg.author.display_name
+            messages.append(f"[{name}]: {msg.content}")
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    messages.reverse()
+    return messages
+
+
+async def query_gizmo(channel_messages: list[str], latest_message: str,
+                      author_name: str, directly_involved: bool) -> str:
+    """Calls the Claude API and returns Gizmo's response or '[no response]'."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        print("ANTHROPIC_API_KEY not set — chatbot disabled.")
+        return "[no response]"
+
+    context_block = "\n".join(channel_messages[:-1]) if len(channel_messages) > 1 else "(no prior messages today)"
+    involvement = (
+        "This message directly mentions, @s, or replies to you. You should strongly consider responding."
+        if directly_involved else
+        "This message does not directly involve you. Only respond if you have something genuinely worth adding."
+    )
+
+    user_content = (
+        f"Recent messages in the channel today:\n{context_block}\n\n"
+        f"Latest message from {author_name}:\n{latest_message}\n\n"
+        f"{involvement}"
+    )
+
+    payload = {
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 1000,
+        "system": GIZMO_SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": user_content}]
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload
+            ) as resp:
+                if resp.status != 200:
+                    print(f"Claude API error: {resp.status} {await resp.text()}")
+                    return "[no response]"
+                data = await resp.json()
+                text = data["content"][0]["text"].strip()
+                return text
+    except Exception as e:
+        print(f"Error calling Claude API: {e}")
+        return "[no response]"
 
 
 
@@ -455,6 +565,34 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
+    # --- Chatbot ---
+    if chatbot_is_enabled() and chatbot_is_ready():
+        # Determine if Gizmo is directly involved
+        bot_mentioned = bot.user in message.mentions
+        name_mentioned = 'gizmo' in message.content.lower()
+        is_reply_to_bot = (
+            message.reference is not None and
+            message.reference.resolved is not None and
+            isinstance(message.reference.resolved, discord.Message) and
+            message.reference.resolved.author.id == bot.user.id
+        )
+        directly_involved = bot_mentioned or name_mentioned or is_reply_to_bot
+
+        channel_messages = await fetch_todays_messages(message.channel, bot.user)
+        response = await query_gizmo(
+            channel_messages,
+            message.content,
+            message.author.display_name,
+            directly_involved
+        )
+
+        if response and response.strip().lower() != "[no response]":
+            try:
+                await message.reply(response)
+                set_chatbot_cooldown()
+                print(f"Gizmo responded in #{message.channel.name}")
+            except discord.Forbidden:
+                print(f"Could not send chatbot response in #{message.channel.name}")
 
 
 # ==========================================
@@ -551,6 +689,19 @@ async def toggle_greeting(ctx: commands.Context):
     key = 'greeting_enabled' if new_state else 'greeting_disabled'
     await ctx.message.delete()
     await ctx.send(fmt(key, mention=ctx.author.mention), delete_after=10)
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def toggle_chatbot(ctx: commands.Context):
+    """(Admin) Toggles Gizmo's AI chat feature on or off."""
+    current = database.get_system_state("CHATBOT_ENABLED", "false")
+    new_state = "false" if current == "true" else "true"
+    database.set_system_state("CHATBOT_ENABLED", new_state)
+
+    label = "**online**" if new_state == "true" else "**offline**"
+    await ctx.message.delete()
+    await ctx.send(f"Affirmative. Gizmo's conversational matrix is now {label}.", delete_after=10)
 
 
 @bot.command()
