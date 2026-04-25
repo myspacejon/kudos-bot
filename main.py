@@ -5,6 +5,7 @@ import random
 import aiohttp
 import discord
 import pytz
+from thefuzz import fuzz
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
@@ -329,9 +330,71 @@ async def get_nudge_thread_summaries():
     return summaries
 
 
+async def find_referenced_project(message_content: str):
+    """Fuzzy-matches message content against project forum thread names.
+
+    Scans all threads in the project forum and scores each thread name against
+    the message using fuzzy partial matching. If the best match scores above 70,
+    fetches and summarises that thread on the spot for runtime context injection.
+
+    Returns a (thread_name, summary) tuple or None if no confident match found.
+    This context is purely runtime — never stored, never affects nudge summaries.
+    """
+    forum = bot.get_channel(PROJECT_FORUM_ID)
+    if not forum:
+        return None
+
+    all_threads = list(forum.threads)
+    try:
+        async for thread in forum.archived_threads(limit=50):
+            all_threads.append(thread)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    if not all_threads:
+        return None
+
+    # Score each thread name against the message
+    best_thread = None
+    best_score = 0
+    for thread in all_threads:
+        score = fuzz.partial_ratio(thread.name.lower(), message_content.lower())
+        if score > best_score:
+            best_score = score
+            best_thread = thread
+
+    if best_score < 70 or best_thread is None:
+        return None
+
+    print(f"[ProjectSearch] Matched '{best_thread.name}' (score: {best_score}) — fetching runtime summary.")
+
+    owner_msgs = await fetch_thread_owner_messages(best_thread)
+    if not owner_msgs:
+        return None
+
+    # Same fetch logic as nudge system: first 2 + middle 3 + last 2
+    if len(owner_msgs) <= 4:
+        selected_msgs = owner_msgs
+    else:
+        first = owner_msgs[:2]
+        last = owner_msgs[-2:]
+        middle = owner_msgs[2:-2]
+        mid_sample = random.sample(middle, min(3, len(middle)))
+        mid_sample.sort(key=lambda x: x[0])
+        selected_msgs = first + mid_sample + last
+
+    summary = await summarise_thread_messages(best_thread.name, selected_msgs)
+    if summary:
+        print(f"[ProjectSearch] Runtime summary for '{best_thread.name}': {summary}")
+        return (best_thread.name, summary)
+
+    return None
+
+
 async def query_gizmo(channel_messages: list[str], latest_message: str,
                       author_name: str, directly_involved: bool,
-                      project_summaries: list[tuple] | None = None) -> str:
+                      project_summaries: list[tuple] | None = None,
+                      referenced_project: tuple | None = None) -> str:
     """Calls the Claude API and returns Gizmo's raw response string.
 
     Response will be one of: SILENT, KUDOS, REPLY: <text>, or KUDOS\nREPLY: <text>.
@@ -339,6 +402,8 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     Args:
         project_summaries: Optional list of (thread_name, summary) tuples for
             project threads in the nudge window.
+        referenced_project: Optional (thread_name, summary) tuple for a project
+            the current message appears to reference directly. Runtime only — not stored.
     """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
@@ -363,10 +428,20 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
             f"Do not force it. Do not mention multiple at once."
         )
 
+    referenced_block = ""
+    if referenced_project:
+        ref_name, ref_summary = referenced_project
+        referenced_block = (
+            f"\n\nREFERENCED PROJECT (the message appears to mention this project directly):\n"
+            f"[{ref_name}]: {ref_summary}\n"
+            f"Use this context to give a more informed and specific response."
+        )
+        print(f"[Gizmo] Injecting referenced project context: '{ref_name}'")
+
     user_content = (
         f"Recent messages in the channel today:\n{context_block}\n\n"
         f"Latest message from {author_name}:\n{latest_message}\n\n"
-        f"{involvement}{project_block}"
+        f"{involvement}{project_block}{referenced_block}"
     )
 
     payload = {
@@ -799,11 +874,18 @@ async def on_message(message: discord.Message):
         directly_involved = bot_mentioned or name_mentioned or is_reply_to_bot
 
         channel_messages = await fetch_todays_messages(message.channel, bot.user)
+
+        # If Gizmo is directly involved, check if the message references a project thread
+        referenced_project = None
+        if directly_involved:
+            referenced_project = await find_referenced_project(message.content)
+
         response = await query_gizmo(
             channel_messages,
             message.content,
             message.author.display_name,
-            directly_involved
+            directly_involved,
+            referenced_project=referenced_project
         )
 
         if response:
