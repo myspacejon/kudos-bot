@@ -409,6 +409,7 @@ async def extract_project_name(recent_messages: list[str]) -> str | None:
                     return None
                 data = await resp.json()
                 result = data["content"][0]["text"].strip()
+                print(f"[ProjectSearch] Pass 1 raw result: '{result}'")
                 if result.upper() == "NONE" or not result:
                     return None
                 print(f"[ProjectSearch] Pass 1 identified project: '{result}'")
@@ -435,6 +436,7 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
 
     forum = bot.get_channel(PROJECT_FORUM_ID)
     if not forum:
+        print(f"[ProjectSearch] Forum channel {PROJECT_FORUM_ID} not found.")
         return None
 
     all_threads = list(forum.threads)
@@ -444,6 +446,8 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     except (discord.Forbidden, discord.HTTPException):
         pass
 
+    print(f"[ProjectSearch] Scanning {len(all_threads)} thread(s): {[t.name for t in all_threads]}")
+
     if not all_threads:
         return "ASK"
 
@@ -452,6 +456,7 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     best_score = 0
     for thread in all_threads:
         score = fuzz.token_set_ratio(project_name.lower(), thread.name.lower())
+        print(f"[ProjectSearch] '{project_name}' vs '{thread.name}': {score}")
         if score > best_score:
             best_score = score
             best_thread = thread
