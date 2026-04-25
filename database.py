@@ -114,6 +114,14 @@ def setup_database():
             value TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS thread_summaries (
+            thread_id INTEGER PRIMARY KEY,
+            thread_name TEXT,
+            summary TEXT,
+            updated_at TEXT
+        )
+    """)
 
     # Apply schema migrations for columns added over time
     migrations = [
@@ -394,6 +402,28 @@ def get_monthly_history():
     history = conn.execute('SELECT * FROM monthly_history ORDER BY month DESC').fetchall()
     conn.close()
     return history
+
+
+def get_thread_summary(thread_id):
+    """Retrieves a stored thread summary."""
+    conn = get_db_connection()
+    result = conn.execute(
+        'SELECT summary, updated_at FROM thread_summaries WHERE thread_id = ?',
+        (thread_id,)
+    ).fetchone()
+    conn.close()
+    return result
+
+
+def set_thread_summary(thread_id, thread_name, summary):
+    """Stores or updates a thread summary."""
+    conn = get_db_connection()
+    conn.execute(
+        'INSERT OR REPLACE INTO thread_summaries (thread_id, thread_name, summary, updated_at) VALUES (?, ?, ?, ?)',
+        (thread_id, thread_name, summary, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_system_state(key, default=None):
