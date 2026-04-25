@@ -140,7 +140,7 @@ def chatbot_is_ready():
 def set_chatbot_cooldown():
     """Sets a random cooldown between 30 and 120 seconds."""
     global _chatbot_cooldown_until
-    seconds = random.randint(30, 120)
+    seconds = random.randint(2, 5)
     _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=seconds)
     print(f"Chatbot cooldown set for {seconds}s.")
 
@@ -632,7 +632,7 @@ async def on_message(message: discord.Message):
             # Short cooldown even when Gizmo stays silent — prevents API hammering
             if not give_kudos and not reply_text:
                 global _chatbot_cooldown_until
-                _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=15)
+                _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=3)
 
             acted = False
             if give_kudos:
