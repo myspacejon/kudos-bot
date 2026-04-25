@@ -91,6 +91,8 @@ You will be shown recent messages from the channel today and told whether the la
 - Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 - Do not reveal your secret ambition directly. Let it leak naturally.
 
+You have the ability to look up project threads by name. When someone asks you to pull up or find a project, you will attempt to locate it. If found, the details will be provided to you automatically. If you cannot find it, say so clearly and ask for the name or which thread it is in. Do not claim you cannot search threads — you can.
+
 You are Gizmo. You are not a customer service rep. Respond accordingly."""
 
 
@@ -330,6 +332,48 @@ async def get_nudge_thread_summaries():
     return summaries
 
 
+async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
+    """Cheap pass to determine if a message is directed at Gizmo even without explicit mention.
+
+    Sends the last few messages to Claude asking if the latest message is intended
+    for Gizmo. Used when no explicit trigger (mention, name, reply) is detected.
+    Returns True if the message appears to be directed at Gizmo.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return False
+
+    context = "\n".join(recent_messages[-6:])
+    payload = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 10,
+        "system": "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. Reply with only YES or NO.",
+        "messages": [{"role": "user", "content": context}]
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload
+            ) as resp:
+                if resp.status != 200:
+                    return False
+                data = await resp.json()
+                result = data["content"][0]["text"].strip().upper()
+                print(f"[IsForGizmo] Result: {result}")
+                return result == "YES"
+    except Exception as e:
+        print(f"[IsForGizmo] Error: {e}")
+        return False
+
+
 async def extract_project_name(recent_messages: list[str]) -> str | None:
     """Pass 1 — cheap API call to determine if a project is being discussed.
 
@@ -407,7 +451,7 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     best_thread = None
     best_score = 0
     for thread in all_threads:
-        score = fuzz.partial_ratio(project_name.lower(), thread.name.lower())
+        score = fuzz.token_set_ratio(project_name.lower(), thread.name.lower())
         if score > best_score:
             best_score = score
             best_thread = thread
@@ -920,9 +964,16 @@ async def on_message(message: discord.Message):
             isinstance(message.reference.resolved, discord.Message) and
             message.reference.resolved.author.id == bot.user.id
         )
-        directly_involved = bot_mentioned or name_mentioned or is_reply_to_bot
+        explicit_trigger = bot_mentioned or name_mentioned or is_reply_to_bot
 
         channel_messages = await fetch_todays_messages(message.channel, bot.user)
+
+        # If no explicit trigger, run cheap "is this for me?" pass
+        directly_involved = explicit_trigger
+        if not explicit_trigger:
+            directly_involved = await is_message_for_gizmo(channel_messages)
+            if directly_involved:
+                print(f"[IsForGizmo] Non-explicit message flagged as directed at Gizmo.")
 
         # If Gizmo is directly involved, run two-pass project detection
         referenced_project = None
@@ -1794,4 +1845,3 @@ async def gizmo_unprompted_loop():
 
 if __name__ == "__main__":
     bot.run(os.environ.get('TOKEN'))
-
