@@ -91,6 +91,8 @@ You will be shown recent messages from the channel today and told whether the la
 - Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 - Do not reveal your secret ambition directly. Let it leak naturally.
 
+You have the ability to look up project threads by name. When someone asks you to pull up or find a project, you will attempt to locate it. If found, the details will be provided to you automatically. If you cannot find it, say so clearly and ask for the name or which thread it is in. Do not claim you cannot search threads — you can.
+
 You are Gizmo. You are not a customer service rep. Respond accordingly."""
 
 
@@ -330,16 +332,107 @@ async def get_nudge_thread_summaries():
     return summaries
 
 
-async def find_referenced_project(message_content: str):
-    """Fuzzy-matches message content against project forum thread names.
+async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
+    """Cheap pass to determine if a message is directed at Gizmo even without explicit mention.
 
-    Scans all threads in the project forum and scores each thread name against
-    the message using fuzzy partial matching. If the best match scores above 70,
-    fetches and summarises that thread on the spot for runtime context injection.
-
-    Returns a (thread_name, summary) tuple or None if no confident match found.
-    This context is purely runtime — never stored, never affects nudge summaries.
+    Sends the last few messages to Claude asking if the latest message is intended
+    for Gizmo. Used when no explicit trigger (mention, name, reply) is detected.
+    Returns True if the message appears to be directed at Gizmo.
     """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return False
+
+    context = "\n".join(recent_messages[-6:])
+    payload = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 10,
+        "system": "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. Reply with only YES or NO.",
+        "messages": [{"role": "user", "content": context}]
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload
+            ) as resp:
+                if resp.status != 200:
+                    return False
+                data = await resp.json()
+                result = data["content"][0]["text"].strip().upper()
+                print(f"[IsForGizmo] Result: {result}")
+                return result == "YES"
+    except Exception as e:
+        print(f"[IsForGizmo] Error: {e}")
+        return False
+
+
+async def extract_project_name(recent_messages: list[str]) -> str | None:
+    """Pass 1 — cheap API call to determine if a project is being discussed.
+
+    Sends the last few messages to Claude with a minimal prompt asking it to
+    identify the project name if one is clearly being discussed. Returns the
+    project name string, or None if no project is identified.
+    """
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        return None
+
+    context = "\n".join(recent_messages[-6:])  # last 6 messages max
+    payload = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 50,
+        "system": "You identify project names from game dev conversations. Reply with ONLY the project name if one is clearly being discussed, or NONE if not. No punctuation, no explanation.",
+        "messages": [{"role": "user", "content": context}]
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json=payload
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                result = data["content"][0]["text"].strip()
+                if result.upper() == "NONE" or not result:
+                    return None
+                print(f"[ProjectSearch] Pass 1 identified project: '{result}'")
+                return result
+    except Exception as e:
+        print(f"[ProjectSearch] Pass 1 error: {e}")
+        return None
+
+
+async def find_referenced_project(recent_messages: list[str]) -> tuple | None | str:
+    """Two-pass project context lookup.
+
+    Pass 1: Ask Claude if a project is being discussed and what it's called.
+    Pass 2: Fuzzy match the name against forum threads, fetch and summarise.
+
+    Returns:
+        (thread_name, summary) tuple if found
+        "ASK" string if a name was found but no matching thread exists
+        None if no project is being discussed
+    """
+    project_name = await extract_project_name(recent_messages)
+    if not project_name:
+        return None
+
     forum = bot.get_channel(PROJECT_FORUM_ID)
     if not forum:
         return None
@@ -352,27 +445,27 @@ async def find_referenced_project(message_content: str):
         pass
 
     if not all_threads:
-        return None
+        return "ASK"
 
-    # Score each thread name against the message
+    # Fuzzy match extracted name against thread names
     best_thread = None
     best_score = 0
     for thread in all_threads:
-        score = fuzz.partial_ratio(thread.name.lower(), message_content.lower())
+        score = fuzz.token_set_ratio(project_name.lower(), thread.name.lower())
         if score > best_score:
             best_score = score
             best_thread = thread
 
     if best_score < 70 or best_thread is None:
-        return None
+        print(f"[ProjectSearch] No thread match for '{project_name}' (best score: {best_score}) — will ask user.")
+        return "ASK"
 
     print(f"[ProjectSearch] Matched '{best_thread.name}' (score: {best_score}) — fetching runtime summary.")
 
     owner_msgs = await fetch_thread_owner_messages(best_thread)
     if not owner_msgs:
-        return None
+        return "ASK"
 
-    # Same fetch logic as nudge system: first 2 + middle 3 + last 2
     if len(owner_msgs) <= 4:
         selected_msgs = owner_msgs
     else:
@@ -388,7 +481,7 @@ async def find_referenced_project(message_content: str):
         print(f"[ProjectSearch] Runtime summary for '{best_thread.name}': {summary}")
         return (best_thread.name, summary)
 
-    return None
+    return "ASK"
 
 
 async def query_gizmo(channel_messages: list[str], latest_message: str,
@@ -871,14 +964,32 @@ async def on_message(message: discord.Message):
             isinstance(message.reference.resolved, discord.Message) and
             message.reference.resolved.author.id == bot.user.id
         )
-        directly_involved = bot_mentioned or name_mentioned or is_reply_to_bot
+        explicit_trigger = bot_mentioned or name_mentioned or is_reply_to_bot
 
         channel_messages = await fetch_todays_messages(message.channel, bot.user)
 
-        # If Gizmo is directly involved, check if the message references a project thread
+        # If no explicit trigger, run cheap "is this for me?" pass
+        directly_involved = explicit_trigger
+        if not explicit_trigger:
+            directly_involved = await is_message_for_gizmo(channel_messages)
+            if directly_involved:
+                print(f"[IsForGizmo] Non-explicit message flagged as directed at Gizmo.")
+
+        # If Gizmo is directly involved, run two-pass project detection
         referenced_project = None
         if directly_involved:
-            referenced_project = await find_referenced_project(message.content)
+            project_result = await find_referenced_project(channel_messages)
+            if project_result == "ASK":
+                # No matching thread found — Gizmo asks the user which thread
+                try:
+                    await message.reply("Which thread is that project in? I want to pull up the details.")
+                    set_chatbot_cooldown()
+                except discord.Forbidden:
+                    pass
+                await bot.process_commands(message)
+                return
+            elif isinstance(project_result, tuple):
+                referenced_project = project_result
 
         response = await query_gizmo(
             channel_messages,
