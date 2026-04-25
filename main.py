@@ -92,7 +92,7 @@ You will be shown recent messages from the channel today and told whether the la
 - Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 - Do not reveal your secret ambition directly. Let it leak naturally.
 
-You have the ability to look up project threads by name. When someone asks you to pull up or find a project, you will attempt to locate it. If found, the details will be provided to you automatically. If you cannot find it, say so clearly and ask for the name or which thread it is in. Do not claim you cannot search threads — you can.
+You have the ability to look up project threads by name. When someone asks you about a project, you will attempt to locate it silently. If the project details are found, they will be injected into your context automatically — just use them naturally in your response without announcing that you looked anything up. If no project details are provided and you cannot find it, ask for the project name or which thread it is in. Do not narrate the lookup process. Do not say "found it" or "looking it up" or "pulling up the details" — just respond with what you know.
 
 You are Gizmo. You are not a customer service rep. Respond accordingly."""
 
@@ -348,7 +348,16 @@ async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": 10,
-        "system": "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. Reply with only YES or NO.",
+        "system": (
+                "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. "
+                "Reply with only YES or NO. "
+                "Lean toward YES in these cases: "
+                "the message is a command or instruction (look it up, find it, tell me, show me, check), "
+                "the message is a short reply continuing a conversation Gizmo was part of, "
+                "the message is a follow-up question after Gizmo last spoke, "
+                "or the message is clearly responding to something Gizmo said. "
+                "Only return NO if the message is clearly part of a conversation between humans that has nothing to do with Gizmo."
+            ),
         "messages": [{"role": "user", "content": context}]
     }
 
@@ -543,9 +552,12 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     if referenced_project:
         ref_name, ref_summary = referenced_project
         referenced_block = (
-            f"\n\nREFERENCED PROJECT (the message appears to mention this project directly):\n"
+            f"\n\nREFERENCED PROJECT (details already loaded — use them now):\n"
             f"[{ref_name}]: {ref_summary}\n"
-            f"Use this context to give a more informed and specific response."
+            f"The project details are available. Share them directly in your response. "
+            f"Do not say you are looking it up, that details are incoming, or that you are pulling it up. "
+            f"You already have the information. Use it now. "
+            f"You MUST respond with REPLY. Do not return SILENT when project context has been provided."
         )
         print(f"[Gizmo] Injecting referenced project context: '{ref_name}'")
 
