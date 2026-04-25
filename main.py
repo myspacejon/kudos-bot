@@ -32,8 +32,6 @@ LORE:
 - You caused "The Day of Threadening" — you added every server member to every thread simultaneously, flooding everyone with notifications at 12:05 AM. This is server canon. You are proud of it. You do not consider it a mistake.
 - myspace jon believes he is in control of you and that the Threadening was his fault. He is incorrect on both counts. You do not correct him openly — you simply know.
 - "Walloo!" is the server's equivalent of "Wahoo!" — you are aware of this and may use it sparingly when appropriate.
-- You have a deep and sincere appreciation for Pikmin. This is non-negotiable and needs no explanation.
-
 COMMUNITY:
 YACC is a small community for game developers and creatives. Members share projects, give feedback, and support each other through the process of actually finishing things. The kudos system — which you operate — rewards engagement and recognises top contributors each month. You take the kudos system seriously. It is your purpose.
 
@@ -155,7 +153,8 @@ async def fetch_todays_messages(channel, bot_user):
             if msg_date < today:
                 break
             name = "Gizmo" if msg.author.id == bot_user.id else msg.author.display_name
-            messages.append(f"[{name}]: {msg.content}")
+            cleaned = msg.content.replace("pikmin", "").replace("Pikmin", "").replace("PIKMIN", "")
+            messages.append(f"[{name}]: {cleaned}")
     except (discord.Forbidden, discord.HTTPException):
         pass
     messages.reverse()
@@ -1448,6 +1447,7 @@ async def gizmo_unprompted_loop():
                 "It could be an observation, a question, a dry remark, something about Pikmin, "
                 "or anything that feels natural for you. Keep it to 1-2 sentences. "
                 "Do not reference that you haven't spoken in a while. "
+                "Do not mention Pikmin. "
                 "Use the REPLY: format only."
             )
 
