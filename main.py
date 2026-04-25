@@ -972,17 +972,25 @@ async def on_message(message: discord.Message):
 
     # --- Chatbot ---
     CHATBOT_CHANNELS = {1430356101634723943, 1497399084045303878}
-    if chatbot_is_enabled() and chatbot_is_ready() and message.channel.id in CHATBOT_CHANNELS:
-        # Determine if Gizmo is directly involved
-        bot_mentioned = bot.user in message.mentions
-        name_mentioned = 'gizmo' in message.content.lower()
-        is_reply_to_bot = (
+    if chatbot_is_enabled() and message.channel.id in CHATBOT_CHANNELS:
+        # Check for explicit triggers first so we can bypass cooldown if directly involved
+        bot_mentioned_pre = bot.user in message.mentions
+        name_mentioned_pre = 'gizmo' in message.content.lower()
+        is_reply_to_bot_pre = (
             message.reference is not None and
             message.reference.resolved is not None and
             isinstance(message.reference.resolved, discord.Message) and
             message.reference.resolved.author.id == bot.user.id
         )
-        explicit_trigger = bot_mentioned or name_mentioned or is_reply_to_bot
+        explicit_trigger_pre = bot_mentioned_pre or name_mentioned_pre or is_reply_to_bot_pre
+
+        # Bypass cooldown if directly involved — always respond when someone is talking to Gizmo
+        if not explicit_trigger_pre and not chatbot_is_ready():
+            await bot.process_commands(message)
+            return
+    if chatbot_is_enabled() and message.channel.id in CHATBOT_CHANNELS:
+        # Determine if Gizmo is directly involved
+        explicit_trigger = explicit_trigger_pre
 
         channel_messages = await fetch_todays_messages(message.channel, bot.user)
 
@@ -1023,11 +1031,14 @@ async def on_message(message: discord.Message):
             reply_text = None
             if "REPLY:" in r:
                 reply_text = r[r.index("REPLY:") + len("REPLY:"):].strip()
+                # Hard strip em and en dashes — replace with period + space
+                reply_text = reply_text.replace("—", ".").replace("–", ".")
 
             # Short cooldown even when Gizmo stays silent — prevents API hammering
             if not give_kudos and not reply_text:
                 global _chatbot_cooldown_until
                 _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=3)
+                print(f"[Gizmo] SILENT in #{message.channel.name} (directly_involved={directly_involved})")
 
             acted = False
             if give_kudos:
