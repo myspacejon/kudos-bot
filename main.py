@@ -380,16 +380,28 @@ async def extract_project_name(recent_messages: list[str]) -> str | None:
     Sends the last few messages to Claude with a minimal prompt asking it to
     identify the project name if one is clearly being discussed. Returns the
     project name string, or None if no project is identified.
+
+    Includes extra context about the nature of the conversation so that short
+    replies like "flea game" in response to Gizmo asking for a project name
+    are correctly identified even without surrounding context.
     """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
         return None
 
-    context = "\n".join(recent_messages[-6:])  # last 6 messages max
+    context = "\n".join(recent_messages[-8:])  # last 8 messages for more context
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": 50,
-        "system": "You identify project names from game dev conversations. Reply with ONLY the project name if one is clearly being discussed, or NONE if not. No punctuation, no explanation.",
+        "system": (
+            "You identify project names from game dev Discord conversations. "
+            "The user may be providing a project name in response to a question — "
+            "extract it even if it is just a short phrase or a few words. "
+            "If Gizmo (the bot) asked for a project name and the user replied with something short, "
+            "that short reply is almost certainly the project name. "
+            "Reply with ONLY the project name, or NONE if no project is being referenced. "
+            "No punctuation, no explanation, no quotes."
+        ),
         "messages": [{"role": "user", "content": context}]
     }
 
