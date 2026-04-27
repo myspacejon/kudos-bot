@@ -92,7 +92,7 @@ You will be shown recent messages from the channel today and told whether the la
 - When in doubt, be kind. Dry humour is fine. Cynicism at the community's expense is not.
 - Do not apologise for being a bot
 - Do not start every message the same way
-- Never use em dashes (-) or en dashes (–). Use full stops instead. This applies to all responses without exception.
+- Never use em dashes (-) or en dashes (-). Use full stops instead. This applies to all responses without exception.
 - Stay in character at all times
 - Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 - Do not reveal your secret ambition directly. Let it leak naturally.
@@ -140,6 +140,11 @@ def get_next_month():
 def fmt(key, **kwargs):
     """Format a MESSAGES config string with the given kwargs."""
     return load_config()['MESSAGES'][key].format(**kwargs)
+
+
+def plural(n, word):
+    """Returns word with 's' appended if n != 1. e.g. plural(1, 'day') -> 'day', plural(3, 'day') -> 'days'"""
+    return word if n == 1 else f"{word}s"
 
 
 async def announce(text):
@@ -721,7 +726,7 @@ async def update_streaks_message():
                 display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
                 streak = user_row['current_streak']
                 best = user_row['best_streak']
-                entries.append(f"`{display_name}` - `{streak}` day(s) current | `{best}` day(s) best")
+                entries.append(f"`{display_name}` - {streak} {plural(streak, 'day')} current / {best} {plural(best, 'day')} best")
 
             embed.description += "\n".join(entries)
 
@@ -1135,7 +1140,7 @@ async def on_message(message: discord.Message):
             if "REPLY:" in r:
                 reply_text = r[r.index("REPLY:") + len("REPLY:"):].strip()
                 # Hard strip em and en dashes - replace with period + space
-                reply_text = reply_text.replace("-", ".").replace("–", ".")
+                reply_text = reply_text.replace("-", ".").replace("-", ".")
 
             # Short cooldown even when Gizmo stays silent - prevents API hammering
             if not give_kudos and not reply_text:
@@ -1451,14 +1456,14 @@ async def stats(ctx: commands.Context):
     if last_post:
         delta_days = (date_cls.today() - date_cls.fromisoformat(last_post)).days
         if delta_days == 0:
-            since_str = "Posted today"
+            since_str = "Last updated today"
         elif delta_days == 1:
-            since_str = "Posted yesterday"
+            since_str = "Last updated yesterday"
         else:
-            since_str = f"{delta_days} days since last post"
+            since_str = f"{delta_days} {plural(current_streak, 'day')} since last post"
     else:
         since_str = "No project posts yet"
-    streak_str = f"Current: `{current_streak}` day(s) | Best: `{best_streak}` day(s)\n{since_str}"
+    streak_str = f"Current: {current_streak} {plural(current_streak, 'day')}\nBest: {best_streak} {plural(best_streak, 'day')}\n{since_str}"
 
     embed = discord.Embed(
         title=f"Performance Record - {ctx.author.display_name}",
