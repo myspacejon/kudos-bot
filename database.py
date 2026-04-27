@@ -138,6 +138,9 @@ def setup_database():
         "ALTER TABLE users ADD COLUMN lifetime_kudos_received INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN lifetime_kudos_given INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN lifetime_exp INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN current_streak INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN best_streak INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN last_project_post_date TEXT",
     ]
     for migration in migrations:
         try:
@@ -197,7 +200,8 @@ def award_kudos(creator_id, reactor_id):
 def award_daily_greeting_kudos(creator_id, bot_id):
     """Awards daily first-message kudos from the bot (infinite supply).
 
-    Creator gets +1 monthly_kudos_received, +1 lifetime_kudos_received, +1 lifetime_exp.
+    Creator gets +1 monthly_kudos_received, +1 lifetime_kudos_received, +2 lifetime_exp.
+    Matches the EXP value of receiving a regular kudos reaction.
     The bot itself does not accumulate anything.
     """
     conn = get_db_connection()
@@ -205,7 +209,7 @@ def award_daily_greeting_kudos(creator_id, bot_id):
         '''UPDATE users
            SET monthly_kudos_received = monthly_kudos_received + 1,
                lifetime_kudos_received = lifetime_kudos_received + 1,
-               lifetime_exp = lifetime_exp + 1
+               lifetime_exp = lifetime_exp + 2
            WHERE user_id = ?''',
         (creator_id,)
     )
@@ -465,6 +469,92 @@ def set_thread_summary(thread_id, thread_name, summary):
     )
     conn.commit()
     conn.close()
+
+
+def update_project_streak(user_id, milestones):
+    """Updates the project thread posting streak for a user.
+
+    Grace period: missing 1 day is forgiven (streak survives) but does not
+    advance the streak count. Missing 2+ days resets the streak to 1.
+
+    Args:
+        user_id (int): The Discord user ID.
+        milestones (list[int]): Milestone values from config.
+
+    Returns:
+        tuple: (current_streak, best_streak, milestone_hit, is_new_day)
+            milestone_hit is the streak value if a milestone was just crossed, else None.
+            is_new_day is True if this is the user's first post today in a project thread.
+    """
+    from datetime import date as date_type
+    conn = get_db_connection()
+    user = conn.execute(
+        'SELECT current_streak, best_streak, last_project_post_date FROM users WHERE user_id = ?',
+        (user_id,)
+    ).fetchone()
+
+    if user is None:
+        conn.close()
+        return (0, 0, None, False)
+
+    today = get_vancouver_today()
+    last_date = user['last_project_post_date']
+    current_streak = user['current_streak'] or 0
+    best_streak = user['best_streak'] or 0
+    milestone_hit = None
+
+    if last_date == today:
+        # Already posted today — no change, not a new day
+        conn.close()
+        return (current_streak, best_streak, None, False)
+
+    is_new_day = True
+
+    if last_date is None:
+        current_streak = 1
+    else:
+        last = date_type.fromisoformat(last_date)
+        today_date = date_type.fromisoformat(today)
+        delta = (today_date - last).days
+
+        if delta == 1:
+            # Consecutive day — advance streak
+            current_streak += 1
+        elif delta == 2:
+            # Grace day — streak survives but does NOT advance
+            pass
+        else:
+            # Gap too large — reset
+            current_streak = 1
+
+    if current_streak > best_streak:
+        best_streak = current_streak
+
+    if current_streak in milestones:
+        milestone_hit = current_streak
+
+    conn.execute(
+        '''UPDATE users
+           SET current_streak = ?,
+               best_streak = ?,
+               last_project_post_date = ?
+           WHERE user_id = ?''',
+        (current_streak, best_streak, today, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return (current_streak, best_streak, milestone_hit, is_new_day)
+
+
+def get_streak_leaderboard():
+    """Returns users with an active streak > 0, sorted by current_streak DESC."""
+    conn = get_db_connection()
+    users = conn.execute(
+        'SELECT * FROM users WHERE current_streak > 0 ORDER BY current_streak DESC'
+    ).fetchall()
+    conn.close()
+    return users
 
 
 def get_system_state(key, default=None):
