@@ -726,7 +726,7 @@ async def update_streaks_message():
                 display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
                 streak = user_row['current_streak']
                 best = user_row['best_streak']
-                entries.append(f"🔥 `{display_name} - {streak} {plural(streak, 'Day')})`")
+                entries.append(f"`🔥  {display_name} - {streak} {plural(streak, 'Day')}`")
 
             embed.description += "\n".join(entries)
 
