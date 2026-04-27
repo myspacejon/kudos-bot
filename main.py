@@ -540,6 +540,8 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         print("ANTHROPIC_API_KEY not set - chatbot disabled.")
         return "[no response]"
 
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
     context_block = "\n".join(channel_messages[:-1]) if len(channel_messages) > 1 else "(no prior messages today)"
     involvement = (
         "This message directly mentions, @s, or replies to you. You should strongly consider responding."
@@ -572,6 +574,7 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         print(f"[Gizmo] Injecting referenced project context: '{ref_name}'")
 
     user_content = (
+        f"[{timestamp}]\n\n"
         f"Recent messages in the channel today:\n{context_block}\n\n"
         f"Latest message from {author_name}:\n{latest_message}\n\n"
         f"{involvement}{project_block}{referenced_block}"
@@ -726,7 +729,7 @@ async def update_streaks_message():
                 display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
                 streak = user_row['current_streak']
                 best = user_row['best_streak']
-                entries.append(f"`🔥 {display_name} - {streak} {plural(streak, 'Day')}`")
+                entries.append(f"`🔥` `{display_name}` → `{streak} {plural(streak, 'Day')}`")
 
             embed.description += "\n".join(entries)
 
@@ -1139,8 +1142,9 @@ async def on_message(message: discord.Message):
             reply_text = None
             if "REPLY:" in r:
                 reply_text = r[r.index("REPLY:") + len("REPLY:"):].strip()
-                # Hard strip em and en dashes - replace with period + space
-                reply_text = reply_text.replace("-", ".").replace("-", ".")
+                # Replace em/en dashes (and surrounding spaces) with ". Capitalized next word"
+                import re
+                reply_text = re.sub(r'\s*[—–]\s*(\w)', lambda m: '. ' + m.group(1).upper(), reply_text)
 
             # Short cooldown even when Gizmo stays silent - prevents API hammering
             if not give_kudos and not reply_text:
@@ -1897,7 +1901,7 @@ async def watched(ctx: commands.Context):
 # TASKS
 # ==========================================
 
-@tasks.loop(seconds=10)
+@tasks.loop(seconds=30)
 async def update_leaderboard_loop():
     await update_leaderboard_message()
     await update_streaks_message()
@@ -2026,8 +2030,8 @@ async def keep_forum_threads_alive():
 
 @tasks.loop(hours=48)
 async def gizmo_unprompted_loop():
-    """Every 6 hours, if the chatbot is enabled and a human has sent a message
-    in a chatbot channel within the last 6 hours, Gizmo sends an unprompted message.
+    """Every 48 hours, if the chatbot is enabled and a human has sent a message
+    in a chatbot channel within the last 48 hours, Gizmo sends an unprompted message.
     Skips if the last message in the channel is already from Gizmo.
     """
     if not chatbot_is_enabled():
