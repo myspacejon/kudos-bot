@@ -7,7 +7,19 @@
     "KUDOS_VALIDITY_DAYS": 7,
     "DAILY_GREETING_ENABLED": false,
     "FORUM_BUMP_HOURS": 167,
-    "EXP_THRESHOLDS": [0, 20, 50, 80, 130, 210, 340, 550, 890, 1440, 2330],
+    "EXP_THRESHOLDS": [
+        0,
+        20,
+        50,
+        80,
+        130,
+        210,
+        340,
+        550,
+        890,
+        1440,
+        2330
+    ],
     "LEADERBOARD_CHANNEL_ID": 1497238733207113800,
     "LEADERBOARD_MESSAGE_ID": 0,
     "HISTORY_MESSAGE_ID": 0,
@@ -56,11 +68,27 @@
         "history_empty": "No historical records available.",
         "leaderboard_footer": "This assessment cycle concludes on {date}.",
         "history_footer": "Historical data is preserved permanently.",
-        "leaderboard_title": "PERFORMANCE LOG",
+        "leaderboard_title": "KUDOS LEDGER",
         "leaderboard_description": "Award kudos by reacting with {emoji}.\n\n",
-        "leaderboard_entry": "`{rank}.` `{name}` → `{kudos} Kudos Given`",
+        "leaderboard_entry": "`{rank}.` `{name}` \u2192 `{kudos} Kudos Given`",
         "history_title": "PERFORMANCE HISTORY",
         "history_description": "Records of past assessment cycle winners.\n\n",
-        "history_entry": "`{month}` → **{name}** • `{kudos} Kudos Given`"
-    }
+        "history_entry": "`{month}` \u2192 **{name}** \u2022 `{kudos} Kudos Given`"
+    },
+    "STREAK_ANNOUNCEMENTS_ENABLED": true,
+    "STREAK_MILESTONES": [
+        2,
+        5,
+        7,
+        14,
+        21,
+        28,
+        35,
+        42,
+        49,
+        56,
+        63,
+        70
+    ],
+    "STREAKS_MESSAGE_ID": 0
 }
