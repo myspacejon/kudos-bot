@@ -689,6 +689,51 @@ async def update_leaderboard_message():
         print(f"An error occurred while updating the leaderboard: {e}")
 
 
+async def update_streaks_message():
+    """Fetches streak data and updates the streaks leaderboard embed."""
+    cfg = load_config()
+    channel_id = cfg.get('LEADERBOARD_CHANNEL_ID')
+    message_id = cfg.get('STREAKS_MESSAGE_ID')
+
+    if not channel_id or not message_id:
+        return
+
+    try:
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            return
+
+        message = await channel.fetch_message(message_id)
+        users_data = database.get_streak_leaderboard()
+
+        embed = discord.Embed(
+            title="ACTIVE STREAKS",
+            description="Units currently on a project update streak.\n\n",
+            color=discord.Color(0xFFFF00)
+        )
+
+        if not users_data:
+            embed.description += "No active streaks. Get to work."
+        else:
+            entries = []
+            for user_row in users_data[:10]:
+                member = channel.guild.get_member(user_row['user_id'])
+                display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
+                streak = user_row['current_streak']
+                best = user_row['best_streak']
+                entries.append(f"`{display_name}` — `{streak}` day(s) current | `{best}` day(s) best")
+
+            embed.description += "\n".join(entries)
+
+        embed.set_footer(text="Streaks reset after 2 missed days.")
+        await message.edit(content=None, embed=embed)
+
+    except discord.NotFound:
+        print("Error: Streaks message not found.")
+    except Exception as e:
+        print(f"An error occurred while updating streaks: {e}")
+
+
 async def update_history_message():
     """Dormant — history embed is currently disabled. Kept for future re-enable.
 
@@ -992,6 +1037,39 @@ async def on_message(message: discord.Message):
         else:
             print(f"New user detected: {message.author.display_name}. Last message date initialized.")
 
+    # --- Project streak tracking ---
+    if message.guild:
+        ch = message.channel
+        if isinstance(ch, discord.Thread) and ch.parent_id == PROJECT_FORUM_ID:
+            if ch.owner_id == message.author.id:
+                cfg_streak = load_config()
+                milestones = cfg_streak.get('STREAK_MILESTONES', [2, 5, 7, 14, 21, 28, 35, 42, 49, 56, 63, 70])
+                current_streak, best_streak, milestone_hit, is_new_day = database.update_project_streak(
+                    message.author.id, milestones
+                )
+                print(f"[Streak] {message.author.display_name} posted in '{ch.name}' — streak: {current_streak} (best: {best_streak}, new_day: {is_new_day})")
+
+                # Silent kudos reaction on first post of the day
+                if is_new_day:
+                    kudos_emoji = discord.utils.get(message.guild.emojis, name=cfg_streak['KUDOS_EMOJI'])
+                    if kudos_emoji:
+                        try:
+                            await message.add_reaction(kudos_emoji)
+                        except discord.Forbidden:
+                            print(f"[Streak] Could not react to {message.author.display_name}'s project post")
+
+                # Milestone announcement
+                if milestone_hit and cfg_streak.get('STREAK_ANNOUNCEMENTS_ENABLED', True):
+                    announcement_channel = bot.get_channel(cfg_streak.get('ANNOUNCEMENT_CHANNEL_ID'))
+                    if announcement_channel:
+                        try:
+                            await announcement_channel.send(
+                                f"Unit {message.author.mention} has posted in their project thread for "
+                                f"**{milestone_hit} consecutive days**. Consistency noted."
+                            )
+                        except discord.Forbidden:
+                            print(f"[Streak] Could not announce milestone for {message.author.display_name}")
+
     await bot.process_commands(message)
 
     # --- Chatbot ---
@@ -1111,6 +1189,26 @@ async def init_leaderboard(ctx: commands.Context):
     await ctx.message.delete()
     await update_leaderboard_message()
     await ctx.send("The performance log is now operational.", delete_after=5)
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def init_streaks(ctx: commands.Context):
+    """(Admin) Creates the streaks embed in the current channel."""
+    cfg = load_config()
+    embed = discord.Embed(
+        title="ACTIVE STREAKS",
+        description="Initializing streaks log. Standby.",
+        color=discord.Color(0xFFFF00)
+    )
+    message = await ctx.send(embed=embed)
+
+    cfg['STREAKS_MESSAGE_ID'] = message.id
+    save_config(cfg)
+
+    await ctx.message.delete()
+    await update_streaks_message()
+    await ctx.send("The streaks log is now operational.", delete_after=5)
 
 
 @bot.command()
@@ -1326,8 +1424,8 @@ async def jam(ctx: commands.Context, member: discord.Member = None):
 
 
 @bot.command()
-async def exp(ctx: commands.Context):
-    """Display your level, EXP, and kudos stats. Ephemeral — deletes after 30s."""
+async def stats(ctx: commands.Context):
+    """Display your full performance stats. Ephemeral — deletes after 30s."""
     cfg = load_config()
     thresholds = cfg['EXP_THRESHOLDS']
     user = database.get_or_create_user(ctx.author.id)
@@ -1344,6 +1442,23 @@ async def exp(ctx: commands.Context):
         progress_str = f"`{progress}/{needed}` EXP to Level {level + 1}"
     else:
         progress_str = "Maximum designation reached."
+
+    # Streak info
+    from datetime import date as date_cls
+    current_streak = user['current_streak'] if user['current_streak'] is not None else 0
+    best_streak = user['best_streak'] if user['best_streak'] is not None else 0
+    last_post = user['last_project_post_date']
+    if last_post:
+        delta_days = (date_cls.today() - date_cls.fromisoformat(last_post)).days
+        if delta_days == 0:
+            since_str = "Posted today"
+        elif delta_days == 1:
+            since_str = "Posted yesterday"
+        else:
+            since_str = f"{delta_days} days since last post"
+    else:
+        since_str = "No project posts yet"
+    streak_str = f"Current: `{current_streak}` day(s) | Best: `{best_streak}` day(s)\n{since_str}"
 
     embed = discord.Embed(
         title=f"Performance Record — {ctx.author.display_name}",
@@ -1362,9 +1477,20 @@ async def exp(ctx: commands.Context):
         value=f"Received: `{user['monthly_kudos_received']}`\nGiven: `{user['monthly_kudos_given']}`",
         inline=True
     )
+    embed.add_field(
+        name="Project Streak",
+        value=streak_str,
+        inline=False
+    )
 
     await ctx.send(embed=embed, delete_after=30)
     await ctx.message.delete()
+
+
+@bot.command()
+async def exp(ctx: commands.Context):
+    """Alias for !stats for backwards compatibility."""
+    await ctx.invoke(stats)
 
 
 @bot.command()
@@ -1769,6 +1895,7 @@ async def watched(ctx: commands.Context):
 @tasks.loop(seconds=10)
 async def update_leaderboard_loop():
     await update_leaderboard_message()
+    await update_streaks_message()
 
 
 @tasks.loop(hours=1)
