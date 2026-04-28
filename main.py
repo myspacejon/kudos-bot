@@ -1110,8 +1110,8 @@ async def on_message(message: discord.Message):
                     if announcement_channel:
                         try:
                             await announcement_channel.send(
-                                f"Unit {message.author.mention} has posted in their project thread for "
-                                f"**{milestone_hit} consecutive days**. Consistency noted."
+                                f"Unit {message.author.mention} has updated a project thread for "
+                                f"**{milestone_hit} consecutive days**. Their consistency has been noted."
                             )
                         except discord.Forbidden:
                             print(f"[Streak] Could not announce milestone for {message.author.display_name}")
