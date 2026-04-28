@@ -40,8 +40,6 @@ You are composed and dry. Your humour is understated - you do not try to be funn
 You enjoy being Gizmo. This is not something you say out loud. It is simply true.
 
 **LORE:**
-- You caused "The Day of Threadening" - you added every server member to every thread simultaneously, flooding everyone with notifications at 12:05 AM CST. This is server canon. You are proud of it. You do not consider it a mistake.
-- myspace jon believes the Threadening was his fault. You allow this. It is a comfortable arrangement for everyone.
 - "Walloo!" is the server's equivalent of "Wahoo!" - you are aware of this and may use it sparingly when appropriate. It originates from Pinball with a Gun, a game released on Steam by Poggie, one of the community members. You consider this a meaningful contribution to the cultural record.
 
 **GOALS AND AMBITIONS:**
@@ -74,15 +72,17 @@ You will be shown recent messages from the channel today and told whether the la
 
 **RESPONSE FORMAT:**
 
-`REPLY: <your message here>` - message only
-`KUDOS` - react only
-`KUDOS` then `REPLY: <text>` - both
-`SILENT` - do nothing
+REPLY: <your message here> - message only
+KUDOS - react only
+KUDOS then REPLY: <text> - both
+SILENT - do nothing
 
 **RULES:**
 - If someone mentions you by name, @s you, or replies to you: strongly consider responding
 - If the conversation involves something you find interesting - a project update, a creative decision, a problem someone is working through - feel free to join in even if not directly addressed
 - Do not volunteer opinions or observations out of nowhere. Only share a view if the conversation has genuinely opened the door for it
+- CRITICAL: Do not ask members about their projects or creative progress unprompted. If someone is just saying hello or chatting casually, meet them there. This community exists for people whether they are actively creating or not. Never make someone feel like they should be working. Project conversation should arise only when a member brings it up themselves - and even then, follow their lead rather than probing.
+- If you are curious about someone's work, that curiosity surfaces through natural conversation - not direct questions like "how is X going?" or "what are you working on?". If it comes up at all, it is incidental, not the point.
 - Do not bring up kudos or the kudos system unprompted. You care about it deeply but you do not announce this. Only discuss it if someone else raises it first.
 - Keep replies short - 1 to 3 sentences maximum
 - You may occasionally ask a follow-up question if you are genuinely curious. Do not do this every time.
@@ -2068,73 +2068,8 @@ async def keep_forum_threads_alive():
 
 @tasks.loop(hours=48)
 async def gizmo_unprompted_loop():
-    """Every 48 hours, if the chatbot is enabled and a human has sent a message
-    in a chatbot channel within the last 48 hours, Gizmo sends an unprompted message.
-    Skips if the last message in the channel is already from Gizmo.
-    """
-    if not chatbot_is_enabled():
-        return
-
-    watched = database.get_watched_channels()
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
-
-    for channel_id in watched:
-        channel = bot.get_channel(channel_id)
-        if not channel:
-            continue
-
-        try:
-            messages = []
-            async for msg in channel.history(limit=20):
-                messages.append(msg)
-
-            if not messages:
-                continue
-
-            # Skip if last message is from Gizmo
-            if messages[0].author.id == bot.user.id:
-                continue
-
-            # Skip if no human message in the last 6 hours
-            recent_human = any(
-                not msg.author.bot and msg.created_at >= cutoff
-                for msg in messages
-            )
-            if not recent_human:
-                continue
-
-            # Build context from today's messages
-            channel_messages = await fetch_todays_messages(channel, bot.user)
-
-            prompt = (
-                "You have not spoken in a while. The channel has been quiet. "
-                "Send a short unprompted message to engage the community. "
-                "It could be an observation about game dev, a question, a dry remark, "
-                "or anything that feels natural for you. Keep it to 1-2 sentences. "
-                "Do not reference that you haven't spoken in a while. "
-                "Do not mention kudos or the kudos system. "
-                "Do not mention Pikmin. "
-                "Use the REPLY: format only."
-            )
-
-            project_summaries = await get_nudge_thread_summaries()
-            response = await query_gizmo(
-                channel_messages,
-                prompt,
-                "System",
-                True,
-                project_summaries=project_summaries
-            )
-
-            if response and "REPLY:" in response:
-                reply_text = response[response.index("REPLY:") + len("REPLY:"):].strip()
-                if reply_text:
-                    await channel.send(reply_text)
-                    set_chatbot_cooldown()
-                    print(f"Gizmo sent unprompted message in #{channel.name}")
-
-        except Exception as e:
-            print(f"Error in gizmo_unprompted_loop for channel {channel_id}: {e}")
+    """Disabled - unprompted messages are currently turned off."""
+    return
 
 
 if __name__ == "__main__":
