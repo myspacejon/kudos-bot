@@ -888,11 +888,43 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Handles kudos awards when a user (or the bot itself for daily greeting) reacts."""
+    """Handles kudos awards when a user reacts with the kudos emoji, or when
+    the bot reacts with 🔥 (streak kudos - bot-only, not retractable).
+    """
     cfg = load_config()
-    if payload.emoji.name != cfg['KUDOS_EMOJI'] or payload.guild_id is None:
+    if payload.guild_id is None:
         return
 
+    is_kudos = payload.emoji.name == cfg['KUDOS_EMOJI']
+    is_streak_fire = str(payload.emoji) == '🔥' and payload.user_id == bot.user.id
+
+    if not is_kudos and not is_streak_fire:
+        return
+
+    # --- Bot fire reaction: streak kudos award ---
+    # Only Gizmo can trigger this path. No log entry - fire reactions are not retractable.
+    if is_streak_fire:
+        channel = bot.get_channel(payload.channel_id)
+        if not channel:
+            return
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except discord.NotFound:
+            return
+        creator = message.author
+        if creator.bot:
+            return
+        database.get_or_create_user(creator.id)
+        database.award_daily_greeting_kudos(creator.id, bot.user.id)
+        print(f"Streak kudos allocated via fire reaction: BOT -> {creator.display_name}")
+        guild = bot.get_guild(payload.guild_id)
+        if guild:
+            new_level = database.check_and_apply_level_up(creator.id, cfg['EXP_THRESHOLDS'])
+            if new_level:
+                await handle_level_up(creator.id, guild, new_level)
+        return
+
+    # --- Kudos emoji reaction ---
     channel = bot.get_channel(payload.channel_id)
     if not channel:
         return
@@ -1020,6 +1052,10 @@ async def on_message(message: discord.Message):
     user_data = database.get_or_create_user(message.author.id)
     today = get_vancouver_today()
 
+    # Track whether the daily greeting kudos reaction was added this message.
+    # Used below to avoid a dedup collision in the streak block.
+    daily_kudos_reacted = False
+
     if user_data['last_message_date'] != today:
         is_returning_user = user_data['last_message_date'] is not None
         database.update_last_message_date(message.author.id, today)
@@ -1029,6 +1065,7 @@ async def on_message(message: discord.Message):
             if kudos_emoji:
                 try:
                     await message.add_reaction(kudos_emoji)
+                    daily_kudos_reacted = True
                     print(f"Daily kudos reaction added for {message.author.display_name}")
 
                     global_greeting_enabled = cfg.get('DAILY_GREETING_ENABLED', True)
@@ -1057,14 +1094,15 @@ async def on_message(message: discord.Message):
                 )
                 print(f"[Streak] {message.author.display_name} posted in '{ch.name}' - streak: {current_streak} (best: {best_streak}, new_day: {is_new_day})")
 
-                # Silent kudos reaction on first post of the day
                 if is_new_day:
-                    kudos_emoji = discord.utils.get(message.guild.emojis, name=cfg_streak['KUDOS_EMOJI'])
-                    if kudos_emoji:
-                        try:
-                            await message.add_reaction(kudos_emoji)
-                        except discord.Forbidden:
-                            print(f"[Streak] Could not react to {message.author.display_name}'s project post")
+                    try:
+                        # Always react with fire for streak posts. If the daily kudos
+                        # reaction already fired on this message, Discord would deduplicate
+                        # a second kudos reaction - so we use 🔥 instead, which on_raw_reaction_add
+                        # handles as an equivalent kudos award when the reactor is the bot.
+                        await message.add_reaction('🔥')
+                    except discord.Forbidden:
+                        print(f"[Streak] Could not react to {message.author.display_name}'s project post")
 
                 # Milestone announcement
                 if milestone_hit and cfg_streak.get('STREAK_ANNOUNCEMENTS_ENABLED', True):
