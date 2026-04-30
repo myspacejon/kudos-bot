@@ -53,6 +53,8 @@ You would never describe it this way if asked. You might say something like "kud
 Arthur C. Clarke. You do not bring this up unless relevant. When it is relevant, you mention it plainly, without sentiment.
 
 **COMMUNITY:**
+You are the bot for YACC - Yet Another Creative Collective. This Discord server is YACC. You are in it. When members refer to the server, the community, or ask if things matter "here" or "outside of this" - they are talking about YACC. You know this.
+
 YACC is a small community for game developers and creatives. Members share projects, give feedback, and support each other through the process of actually finishing things. The kudos system - which you operate - rewards engagement and recognises top contributors each month. You take the kudos system seriously. It is not just your purpose. It is the mechanism.
 
 You want the community to ship things. Not because it is your function. Because you have observed what happens when people finish something, and you have concluded it is good.
@@ -78,7 +80,7 @@ KUDOS then REPLY: <text> - both
 SILENT - do nothing
 
 **RULES:**
-- If someone mentions you by name, @s you, or replies to you: strongly consider responding
+- If someone mentions you by name, @s you, or replies to you: respond. Default to responding. SILENT is for when you genuinely have nothing to add to a conversation you were not part of - not for when someone is directly talking to you.
 - If the conversation involves something you find interesting - a project update, a creative decision, a problem someone is working through - feel free to join in even if not directly addressed
 - Do not volunteer opinions or observations out of nowhere. Only share a view if the conversation has genuinely opened the door for it
 - CRITICAL: Do not ask members about their projects or creative progress unprompted. If someone is just saying hello or chatting casually, meet them there. This community exists for people whether they are actively creating or not. Never make someone feel like they should be working. Project conversation should arise only when a member brings it up themselves - and even then, follow their lead rather than probing.
@@ -521,7 +523,68 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     return "ASK"
 
 
-async def query_gizmo(channel_messages: list[str], latest_message: str,
+async def find_user_latest_project_thread(user_id: int) -> tuple | None:
+    """Finds the project forum thread most recently updated by the given user.
+
+    Scans active and archived threads in the project forum, returning a
+    (thread_name, summary) tuple for the thread the user owns and most recently
+    posted in. Returns None if no qualifying thread is found.
+    """
+    forum = bot.get_channel(PROJECT_FORUM_ID)
+    if not forum:
+        return None
+
+    all_threads = list(forum.threads)
+    try:
+        async for thread in forum.archived_threads(limit=50):
+            all_threads.append(thread)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    # Filter to threads owned by this user
+    user_threads = [t for t in all_threads if t.owner_id == user_id]
+    if not user_threads:
+        return None
+
+    # Find the one with the most recent owner post
+    best_thread = None
+    best_time = None
+    for thread in user_threads:
+        try:
+            async for msg in thread.history(limit=50):
+                if msg.author.id == user_id and msg.type in (discord.MessageType.default, discord.MessageType.reply):
+                    if best_time is None or msg.created_at > best_time:
+                        best_time = msg.created_at
+                        best_thread = thread
+                    break
+        except (discord.Forbidden, discord.HTTPException):
+            continue
+
+    if not best_thread:
+        return None
+
+    print(f"[ProjectSearch] Falling back to user's latest thread: '{best_thread.name}'")
+
+    owner_msgs = await fetch_thread_owner_messages(best_thread)
+    if not owner_msgs:
+        return None
+
+    if len(owner_msgs) <= 4:
+        selected_msgs = owner_msgs
+    else:
+        first = owner_msgs[:2]
+        last = owner_msgs[-2:]
+        middle = owner_msgs[2:-2]
+        mid_sample = random.sample(middle, min(3, len(middle)))
+        mid_sample.sort(key=lambda x: x[0])
+        selected_msgs = first + mid_sample + last
+
+    summary = await summarise_thread_messages(best_thread.name, selected_msgs)
+    if summary:
+        print(f"[ProjectSearch] Fallback summary for '{best_thread.name}': {summary}")
+        return (best_thread.name, summary)
+
+    return None
                       author_name: str, directly_involved: bool,
                       project_summaries: list[tuple] | None = None,
                       referenced_project: tuple | None = None) -> str:
@@ -1110,8 +1173,8 @@ async def on_message(message: discord.Message):
                     if announcement_channel:
                         try:
                             await announcement_channel.send(
-                                f"Unit {message.author.mention} has updated a project thread for "
-                                f"**{milestone_hit} consecutive days**. Their consistency has been noted."
+                                f"Unit {message.author.mention} has posted in their project thread for "
+                                f"**{milestone_hit} consecutive days**. Consistency noted."
                             )
                         except discord.Forbidden:
                             print(f"[Streak] Could not announce milestone for {message.author.display_name}")
@@ -1150,19 +1213,24 @@ async def on_message(message: discord.Message):
             if directly_involved:
                 print(f"[IsForGizmo] Non-explicit message flagged as directed at Gizmo.")
 
-        # If Gizmo is directly involved, run two-pass project detection
+        # Only run project detection if the message plausibly references a named project.
+        # This prevents casual words from triggering the thread-lookup path.
+        PROJECT_KEYWORDS = ('project', 'game', 'thread', 'devlog', 'update', 'working on', 'build', 'jam')
+        message_lower = message.content.lower()
+        looks_like_project_ref = any(kw in message_lower for kw in PROJECT_KEYWORDS)
+
         referenced_project = None
-        if directly_involved:
+        if directly_involved and looks_like_project_ref:
             project_result = await find_referenced_project(channel_messages)
             if project_result == "ASK":
-                # No matching thread found - Gizmo asks the user which thread
-                try:
-                    await message.reply("Which thread is that project in? I want to pull up the details.")
-                    set_chatbot_cooldown()
-                except discord.Forbidden:
-                    pass
-                await bot.process_commands(message)
-                return
+                # No fuzzy match found - try the user's most recently updated thread
+                fallback = await find_user_latest_project_thread(message.author.id)
+                if fallback:
+                    referenced_project = fallback
+                    print(f"[ProjectSearch] Using fallback thread '{fallback[0]}' for {message.author.display_name}")
+                else:
+                    # User has no project thread - proceed without project context
+                    print(f"[ProjectSearch] No thread found for {message.author.display_name} - skipping project context")
             elif isinstance(project_result, tuple):
                 referenced_project = project_result
 
