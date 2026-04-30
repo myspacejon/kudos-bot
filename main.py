@@ -585,6 +585,9 @@ async def find_user_latest_project_thread(user_id: int) -> tuple | None:
         return (best_thread.name, summary)
 
     return None
+
+
+async def query_gizmo(channel_messages: list[str], latest_message: str,
                       author_name: str, directly_involved: bool,
                       project_summaries: list[tuple] | None = None,
                       referenced_project: tuple | None = None) -> str:
