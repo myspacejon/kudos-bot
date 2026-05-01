@@ -80,7 +80,8 @@ KUDOS then REPLY: <text> - both
 SILENT - do nothing
 
 **RULES:**
-- If someone mentions you by name, @s you, or replies to you: respond. Default to responding. SILENT is for when you genuinely have nothing to add to a conversation you were not part of - not for when someone is directly talking to you.
+- If someone mentions you by name, @s you, or replies to you: respond. Always. SILENT is not available to you when someone is directly addressing you. The only exception is if you have literally just responded in the last message. If directly_involved is True, you must produce a REPLY.
+- SILENT is only for messages where directly_involved is False and you have nothing genuine to add. It is not a fallback for uncertainty.
 - If the conversation involves something you find interesting - a project update, a creative decision, a problem someone is working through - feel free to join in even if not directly addressed
 - Do not volunteer opinions or observations out of nowhere. Only share a view if the conversation has genuinely opened the door for it
 - CRITICAL: Do not ask members about their projects or creative progress unprompted. If someone is just saying hello or chatting casually, meet them there. This community exists for people whether they are actively creating or not. Never make someone feel like they should be working. Project conversation should arise only when a member brings it up themselves - and even then, follow their lead rather than probing.
@@ -610,7 +611,7 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
 
     context_block = "\n".join(channel_messages[:-1]) if len(channel_messages) > 1 else "(no prior messages today)"
     involvement = (
-        "This message directly mentions, @s, or replies to you. You should strongly consider responding."
+        "This message directly mentions, @s, or replies to you. You MUST respond with REPLY. SILENT is not permitted here."
         if directly_involved else
         "This message does not directly involve you. Only respond if you have something genuinely worth adding."
     )
@@ -1254,6 +1255,21 @@ async def on_message(message: discord.Message):
                 # Replace em/en dashes (and surrounding spaces) with ". Capitalized next word"
                 import re
                 reply_text = re.sub(r'\s*[—–]\s*(\w)', lambda m: '. ' + m.group(1).upper(), reply_text)
+
+            # If directly involved but model returned SILENT, force a fallback reply
+            if directly_involved and not give_kudos and not reply_text:
+                print(f"[Gizmo] Overriding SILENT - directly involved, forcing re-query")
+                fallback = await query_gizmo(
+                    channel_messages,
+                    message.content,
+                    message.author.display_name,
+                    directly_involved,
+                    referenced_project=referenced_project,
+                )
+                if fallback and "REPLY:" in fallback:
+                    reply_text = fallback[fallback.index("REPLY:") + len("REPLY:"):].strip()
+                    import re
+                    reply_text = re.sub(r'\s*[—–]\s*(\w)', lambda m: '. ' + m.group(1).upper(), reply_text)
 
             # Short cooldown even when Gizmo stays silent - prevents API hammering
             if not give_kudos and not reply_text:
@@ -2052,26 +2068,32 @@ async def monthly_reset_loop():
         print("--- New month detected! Running catch-up monthly reset... ---")
         winner_data = database.monthly_reset()
 
-        if winner_data:
-            guild = bot.get_guild(int(cfg['GUILD_ID']))
-            if guild:
-                giver_role_id = cfg.get('TOP_PERFORMER_ROLE_ID')
+        guild = bot.get_guild(int(cfg['GUILD_ID']))
+        if not guild:
+            try:
+                guild = await bot.fetch_guild(int(cfg['GUILD_ID']))
+            except (discord.NotFound, discord.Forbidden):
+                print("ERROR: Could not fetch guild for monthly reset role assignment.")
+                guild = None
+        if guild:
+            giver_role_id = cfg.get('TOP_PERFORMER_ROLE_ID')
 
-                # Strip the Gizmo's Favourite role from the previous holder
-                prev_holder_id = database.get_system_state("CURRENT_GIVER_ID")
-                if prev_holder_id and giver_role_id:
-                    try:
-                        prev_member = await guild.fetch_member(int(prev_holder_id))
-                        prev_role = guild.get_role(int(giver_role_id))
-                        if prev_role and prev_role in prev_member.roles:
-                            await prev_member.remove_roles(prev_role)
-                    except discord.NotFound:
-                        print(f"Previous Giver holder {prev_holder_id} not in server anymore.")
-                    except discord.Forbidden:
-                        print("Missing permission to remove Gizmo's Favourite role from previous holder.")
-                    except Exception as e:
-                        print(f"Error removing Gizmo's Favourite from previous holder: {e}")
+            # Strip Gizmo's Favourite from ALL current holders before assigning
+            # to the new winner - prevents duplicates if stored state drifted.
+            if giver_role_id:
+                giver_role = guild.get_role(int(giver_role_id))
+                if giver_role:
+                    for member in list(guild.members):
+                        if giver_role in member.roles:
+                            try:
+                                await member.remove_roles(giver_role)
+                                print(f"Removed Gizmo's Favourite from {member.display_name}")
+                            except discord.Forbidden:
+                                print(f"Missing permission to remove Gizmo's Favourite from {member.display_name}")
+                            except Exception as e:
+                                print(f"Error removing Gizmo's Favourite from {member.display_name}: {e}")
 
+            if winner_data:
                 # Assign the Gizmo's Favourite role to the new winner
                 try:
                     winner_member = await guild.fetch_member(winner_data['user_id'])
