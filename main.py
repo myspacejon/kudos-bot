@@ -1415,9 +1415,87 @@ async def toggle_greeting(ctx: commands.Context):
     await ctx.send(fmt(key, mention=ctx.author.mention), delete_after=10)
 
 
-@bot.command()
-@commands.has_role(int(config['ADMIN_ROLE_ID']))
-async def toggle_chatbot(ctx: commands.Context):
+@bot.command(aliases=['color'])
+async def colour(ctx: commands.Context, level: str = None):
+    """Override your name colour with any colour role you've earned.
+
+    Usage: !colour <level>  - apply colour for that level (must be <= your current level)
+           !colour reset     - remove colour override and return to default
+    """
+    cfg = load_config()
+    color_roles = cfg.get('COLOR_ROLES', {})
+
+    if not color_roles:
+        await ctx.send("Colour override roles are not configured.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    all_color_role_ids = {int(rid) for rid in color_roles.values()}
+
+    # Reset path
+    if level is None or level.lower() in ('reset', '0'):
+        roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids]
+        if roles_to_remove:
+            try:
+                await ctx.author.remove_roles(*roles_to_remove)
+            except discord.Forbidden:
+                await ctx.send("Missing permission to remove colour roles.", delete_after=10)
+                await ctx.message.delete()
+                return
+        database.set_color_override(ctx.author.id, None)
+        await ctx.message.delete()
+        await ctx.send(f"Colour override removed, {ctx.author.mention}. Reverting to level default.", delete_after=10)
+        return
+
+    # Validate input
+    if not level.isdigit():
+        await ctx.send("Usage: `!colour <level>` or `!colour reset`", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    requested = int(level)
+    if requested < 1 or requested > len(color_roles):
+        await ctx.send(f"Valid levels are 1 to {len(color_roles)}.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    # Check user's current level
+    user = database.get_or_create_user(ctx.author.id)
+    thresholds = cfg['EXP_THRESHOLDS']
+    current_level = database.calculate_level(user['lifetime_exp'], thresholds)
+
+    if requested > current_level:
+        await ctx.send(
+            f"You haven't reached Level {requested} yet. Your current level is {current_level}.",
+            delete_after=10
+        )
+        await ctx.message.delete()
+        return
+
+    # Apply: strip all colour overrides, add the requested one
+    target_role_id = int(color_roles[str(requested)])
+    target_role = ctx.guild.get_role(target_role_id)
+    if not target_role:
+        await ctx.send("Colour role not found in server. Check configuration.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids and r.id != target_role_id]
+    try:
+        if roles_to_remove:
+            await ctx.author.remove_roles(*roles_to_remove)
+        await ctx.author.add_roles(target_role)
+    except discord.Forbidden:
+        await ctx.send("Missing permission to assign colour roles.", delete_after=10)
+        await ctx.message.delete()
+        return
+
+    database.set_color_override(ctx.author.id, requested)
+    await ctx.message.delete()
+    await ctx.send(
+        f"Colour override set to Level {requested} for {ctx.author.mention}.",
+        delete_after=10
+    )
     """(Admin) Toggles Gizmo's AI chat feature on or off."""
     current = database.get_system_state("CHATBOT_ENABLED", "false")
     new_state = "false" if current == "true" else "true"
