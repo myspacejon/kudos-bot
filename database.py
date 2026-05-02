@@ -10,16 +10,7 @@ VANCOUVER_TZ = pytz.timezone('America/Vancouver')
 
 
 def calculate_level(lifetime_exp, thresholds):
-    """Calculates the level for a given lifetime EXP total using provided thresholds.
-
-    Args:
-        lifetime_exp (int): The user's total lifetime EXP.
-        thresholds (list[int]): Ordered list of EXP thresholds for each level (passed
-            in from config['EXP_THRESHOLDS']).
-
-    Returns:
-        int: The calculated level (1-indexed).
-    """
+    """Calculates the level for a given lifetime EXP total using provided thresholds."""
     level = 1
     for i, threshold in enumerate(thresholds):
         if lifetime_exp >= threshold:
@@ -28,18 +19,7 @@ def calculate_level(lifetime_exp, thresholds):
 
 
 def check_and_apply_level_up(user_id, thresholds):
-    """Recomputes level from stored lifetime_exp and updates lifetime_level if different.
-
-    Since EXP is monotonically increasing, this can only produce level-ups, never
-    level-downs.
-
-    Args:
-        user_id (int): The Discord user's ID.
-        thresholds (list[int]): EXP thresholds from config.
-
-    Returns:
-        int | None: New level if changed, otherwise None.
-    """
+    """Recomputes level from stored lifetime_exp and updates lifetime_level if different."""
     conn = get_db_connection()
     user = conn.execute(
         'SELECT lifetime_exp, lifetime_level FROM users WHERE user_id = ?', (user_id,)
@@ -141,6 +121,7 @@ def setup_database():
         "ALTER TABLE users ADD COLUMN current_streak INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN best_streak INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN last_project_post_date TEXT",
+        "ALTER TABLE users ADD COLUMN color_override INTEGER DEFAULT NULL",
     ]
     for migration in migrations:
         try:
@@ -167,12 +148,7 @@ def get_or_create_user(user_id):
 
 
 def award_kudos(creator_id, reactor_id):
-    """Awards kudos to a message creator and the user who reacted.
-
-    Creator:  +1 monthly_kudos_received, +1 lifetime_kudos_received, +2 lifetime_exp.
-    Reactor:  +1 monthly_kudos_given,    +1 lifetime_kudos_given,    +1 lifetime_exp,
-              +1 daily_awards_given, last_award_date updated.
-    """
+    """Awards kudos to a message creator and the user who reacted."""
     conn = get_db_connection()
     today = get_vancouver_today()
     conn.execute(
@@ -198,12 +174,7 @@ def award_kudos(creator_id, reactor_id):
 
 
 def award_daily_greeting_kudos(creator_id, bot_id):
-    """Awards daily first-message kudos from the bot (infinite supply).
-
-    Creator gets +1 monthly_kudos_received, +1 lifetime_kudos_received, +2 lifetime_exp.
-    Matches the EXP value of receiving a regular kudos reaction.
-    The bot itself does not accumulate anything.
-    """
+    """Awards daily first-message kudos from the bot (infinite supply)."""
     conn = get_db_connection()
     conn.execute(
         '''UPDATE users
@@ -218,15 +189,7 @@ def award_daily_greeting_kudos(creator_id, bot_id):
 
 
 def remove_kudos(creator_id, reactor_id):
-    """Removes kudos when a reaction is retracted.
-
-    Creator: -1 monthly_kudos_received, -1 lifetime_kudos_received (floor 0).
-    Reactor: -1 monthly_kudos_given,    -1 lifetime_kudos_given    (floor 0).
-
-    lifetime_exp is NEVER decremented. EXP is a permanent earned stat; kudos counts
-    are reversible accounting. Per the Fire-and-Forget principle, the daily award
-    credit is NOT refunded either.
-    """
+    """Removes kudos when a reaction is retracted. EXP is never decremented."""
     conn = get_db_connection()
     conn.execute(
         '''UPDATE users
@@ -261,10 +224,7 @@ def reset_daily_limit_if_needed(user_id):
 
 
 def get_leaderboard_data():
-    """Returns users with monthly_kudos_given > 0, sorted by monthly_kudos_given DESC.
-
-    The leaderboard now ranks top kudos *givers* of the current cycle.
-    """
+    """Returns users with monthly_kudos_given > 0, sorted by monthly_kudos_given DESC."""
     conn = get_db_connection()
     users = conn.execute(
         'SELECT * FROM users WHERE monthly_kudos_given > 0 ORDER BY monthly_kudos_given DESC'
@@ -274,12 +234,7 @@ def get_leaderboard_data():
 
 
 def apply_daily_maintenance(decay):
-    """Applies daily kudos decay to monthly_kudos_given totals.
-
-    Args:
-        decay (int): Amount to subtract from each user's monthly_kudos_given.
-            No-op if <= 0.
-    """
+    """Applies daily kudos decay to monthly_kudos_given totals."""
     if decay <= 0:
         return
     conn = get_db_connection()
@@ -292,16 +247,7 @@ def apply_daily_maintenance(decay):
 
 
 def monthly_reset():
-    """Resets monthly kudos counters and records the top giver as winner.
-
-    Does NOT modify lifetime_level — leveling is EXP-based and continuous now.
-    Winner is determined by monthly_kudos_given DESC. Monthly history stores the
-    winner's monthly_kudos_given in the existing monthly_kudos column (name
-    preserved for schema compatibility).
-
-    Returns:
-        sqlite3.Row | None: The winning user's row, or None if no one gave kudos.
-    """
+    """Resets monthly kudos counters and records the top giver as winner."""
     conn = get_db_connection()
     winner = conn.execute(
         'SELECT * FROM users WHERE monthly_kudos_given > 0 ORDER BY monthly_kudos_given DESC LIMIT 1'
@@ -322,7 +268,7 @@ def monthly_reset():
         )
 
     conn.execute('UPDATE users SET monthly_kudos_received = 0, monthly_kudos_given = 0')
-    conn.execute('DELETE FROM kudos_log')  # Enforces the "Immutable Past"
+    conn.execute('DELETE FROM kudos_log')
     conn.commit()
     conn.close()
 
@@ -471,20 +417,25 @@ def set_thread_summary(thread_id, thread_name, summary):
     conn.close()
 
 
+def set_color_override(user_id, level):
+    """Stores the user's chosen colour override level. Pass None to clear."""
+    conn = get_db_connection()
+    conn.execute(
+        'UPDATE users SET color_override = ? WHERE user_id = ?',
+        (level, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def update_project_streak(user_id, milestones):
     """Updates the project thread posting streak for a user.
 
     Grace period: missing 1 day is forgiven (streak survives) but does not
     advance the streak count. Missing 2+ days resets the streak to 1.
 
-    Args:
-        user_id (int): The Discord user ID.
-        milestones (list[int]): Milestone values from config.
-
     Returns:
         tuple: (current_streak, best_streak, milestone_hit, is_new_day)
-            milestone_hit is the streak value if a milestone was just crossed, else None.
-            is_new_day is True if this is the user's first post today in a project thread.
     """
     from datetime import date as date_type
     conn = get_db_connection()
@@ -504,7 +455,6 @@ def update_project_streak(user_id, milestones):
     milestone_hit = None
 
     if last_date == today:
-        # Already posted today — no change, not a new day
         conn.close()
         return (current_streak, best_streak, None, False)
 
@@ -518,13 +468,10 @@ def update_project_streak(user_id, milestones):
         delta = (today_date - last).days
 
         if delta == 1:
-            # Consecutive day — advance streak
             current_streak += 1
         elif delta == 2:
-            # Grace day — streak survives but does NOT advance
-            pass
+            pass  # Grace day - streak survives but does not advance
         else:
-            # Gap too large — reset
             current_streak = 1
 
     if current_streak > best_streak:
