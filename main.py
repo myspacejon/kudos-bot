@@ -185,14 +185,15 @@ def set_chatbot_cooldown():
     print(f"Chatbot cooldown set for {seconds}s.")
 
 
-async def fetch_todays_messages(channel, bot_user, context_hours=12):
-    """Fetches messages from the last context_hours from a channel, oldest first."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=context_hours)
+async def fetch_todays_messages(channel, bot_user, context_hours=12, max_messages=100):
+    """Fetches the last max_messages from a channel as a circular buffer, oldest first.
+
+    context_hours is kept as a parameter for API compatibility but the primary
+    constraint is now max_messages. This prevents token bloat on active channels.
+    """
     messages = []
     try:
-        async for msg in channel.history(limit=200):
-            if msg.created_at < cutoff:
-                break
+        async for msg in channel.history(limit=max_messages):
             name = "Gizmo" if msg.author.id == bot_user.id else msg.author.display_name
             cleaned = msg.content.replace("pikmin", "").replace("Pikmin", "").replace("PIKMIN", "")
             messages.append(f"[{name}]: {cleaned}")
@@ -363,7 +364,7 @@ async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
         "max_tokens": 10,
         "system": (
                 "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. "
-                "Reply with only YES or NO. "
+                "Reply with only the word YES or the word NO. No other output. Never explain. Never refuse. "
                 "Lean toward YES in these cases: "
                 "the message is a command or instruction (look it up, find it, tell me, show me, check), "
                 "the message is a short reply continuing a conversation Gizmo was part of, "
@@ -1291,8 +1292,13 @@ async def on_message(message: discord.Message):
                 try:
                     await message.reply(reply_text)
                     acted = True
-                except discord.Forbidden:
-                    print(f"Could not send chatbot response in #{message.channel.name}")
+                except (discord.Forbidden, discord.HTTPException):
+                    # Message may have been deleted - fall back to plain channel send
+                    try:
+                        await message.channel.send(reply_text)
+                        acted = True
+                    except discord.Forbidden:
+                        print(f"Could not send chatbot response in #{message.channel.name}")
 
             if acted:
                 set_chatbot_cooldown()
@@ -1422,12 +1428,18 @@ async def colour(ctx: commands.Context, level: str = None):
     Usage: !colour <level>  - apply colour for that level (must be <= your current level)
            !colour reset     - remove colour override and return to default
     """
+    async def safe_delete():
+        try:
+            await ctx.message.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
+
     cfg = load_config()
     color_roles = cfg.get('COLOR_ROLES', {})
 
     if not color_roles:
         await ctx.send("Colour override roles are not configured.", delete_after=10)
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     all_color_role_ids = {int(rid) for rid in color_roles.values()}
@@ -1440,23 +1452,23 @@ async def colour(ctx: commands.Context, level: str = None):
                 await ctx.author.remove_roles(*roles_to_remove)
             except discord.Forbidden:
                 await ctx.send("Missing permission to remove colour roles.", delete_after=10)
-                await ctx.message.delete()
+                await safe_delete()
                 return
         database.set_color_override(ctx.author.id, None)
-        await ctx.message.delete()
+        await safe_delete()
         await ctx.send(f"Colour override removed, {ctx.author.mention}. Reverting to level default.", delete_after=10)
         return
 
     # Validate input
     if not level.isdigit():
         await ctx.send("Usage: `!colour <level>` or `!colour reset`", delete_after=10)
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     requested = int(level)
     if requested < 1 or requested > len(color_roles):
         await ctx.send(f"Valid levels are 1 to {len(color_roles)}.", delete_after=10)
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     # Check user's current level
@@ -1469,7 +1481,7 @@ async def colour(ctx: commands.Context, level: str = None):
             f"You haven't reached Level {requested} yet. Your current level is {current_level}.",
             delete_after=10
         )
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     # Apply: strip all colour overrides, add the requested one
@@ -1477,7 +1489,7 @@ async def colour(ctx: commands.Context, level: str = None):
     target_role = ctx.guild.get_role(target_role_id)
     if not target_role:
         await ctx.send("Colour role not found in server. Check configuration.", delete_after=10)
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids and r.id != target_role_id]
@@ -1487,15 +1499,20 @@ async def colour(ctx: commands.Context, level: str = None):
         await ctx.author.add_roles(target_role)
     except discord.Forbidden:
         await ctx.send("Missing permission to assign colour roles.", delete_after=10)
-        await ctx.message.delete()
+        await safe_delete()
         return
 
     database.set_color_override(ctx.author.id, requested)
-    await ctx.message.delete()
+    await safe_delete()
     await ctx.send(
         f"Colour override set to Level {requested} for {ctx.author.mention}.",
         delete_after=10
     )
+
+
+@bot.command()
+@commands.has_role(int(config['ADMIN_ROLE_ID']))
+async def toggle_chatbot(ctx: commands.Context):
     """(Admin) Toggles Gizmo's AI chat feature on or off."""
     current = database.get_system_state("CHATBOT_ENABLED", "false")
     new_state = "false" if current == "true" else "true"
