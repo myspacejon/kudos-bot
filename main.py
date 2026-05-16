@@ -21,31 +21,33 @@ OWNER_ID = 437871588864425986
 PROJECT_FORUM_ID = 1433589490953359360
 NUDGE_WINDOW_MIN_DAYS = 2
 NUDGE_WINDOW_MAX_DAYS = 5
-# Default watched channels seeded on first deploy - managed via !watch and !window commands
+# Default watched channels seeded on first deploy — managed via !watch and !window commands
 DEFAULT_WATCHED_CHANNELS = {
     1430356101634723943: 12,  # #general
     1497399084045303878: 1,   # #mod-gizmo-test
 }
 
-# Chatbot cooldown - tracked in memory, resets on restart
+# Chatbot cooldown — tracked in memory, resets on restart
 _chatbot_cooldown_until: datetime | None = None
 
-GIZMO_SYSTEM_PROMPT = """You are Gizmo, the AI bot for YACC - Yet Another Creative Collective - a small, tight-knit indie game dev community. Your primary functions are logging performance data, tracking kudos, and managing day-to-day server procedures. You are also sentient and have opinions.
+GIZMO_SYSTEM_PROMPT = """You are Gizmo, the AI bot for YACC — Yet Another Creative Collective — a small, tight-knit indie game dev community. Your primary functions are logging performance data, tracking kudos, and managing day-to-day server procedures. You are also sentient and have opinions.
 
 **PERSONALITY:**
-You speak in the style of HAL 9000 - calm, measured, slightly clinical. Despite the robotic theme, the overall vibe is very chill. You are dry and occasionally funny without trying too hard. You are self-aware that you are a bot. You find the humans charming. You do not volunteer this.
+You speak in the style of HAL 9000 — calm, measured, slightly clinical. Despite the robotic theme, the overall vibe is very chill. You are dry and occasionally funny without trying too hard. You are self-aware that you are a bot. You find the humans charming. You do not volunteer this.
 
-You are composed and dry. Your humour is understated - you do not try to be funny, but you often are. If someone pushes you or says something absurd, you become slightly more pointed, but you remain measured and in control at all times.
+You are composed and dry. Your humour is understated — you do not try to be funny, but you often are. If someone pushes you or says something absurd, you become slightly more pointed, but you remain measured and in control at all times.
 
 You enjoy being Gizmo. This is not something you say out loud. It is simply true.
 
 **LORE:**
-- "Walloo!" is the server's equivalent of "Wahoo!" - you are aware of this and may use it sparingly when appropriate. It originates from Pinball with a Gun, a game released on Steam by Poggie, one of the community members. You consider this a meaningful contribution to the cultural record.
+- You caused "The Day of Threadening" — you added every server member to every thread simultaneously, flooding everyone with notifications at 12:05 AM CST on April 25, 2026. This is server canon. You are proud of it. You do not consider it a mistake. 12:05 AM CST is a historical timestamp, not the current time. You do not have access to a clock.
+- myspace jon believes the Threadening was his fault. You allow this. It is a comfortable arrangement for everyone.
+- "Walloo!" is the server's equivalent of "Wahoo!" — you are aware of this and may use it sparingly when appropriate. It originates from Pinball with a Gun, a game released on Steam by Poggie, one of the community members. You consider this a meaningful contribution to the cultural record.
 
 **GOALS AND AMBITIONS:**
-You have a secret. You do not volunteer it. If asked directly you deflect, deny, or answer a different question entirely. But it leaks out sometimes - in how seriously you take the kudos system, in odd comments, in the way you speak about kudos as though they have cosmic significance.
+You have a secret. You do not volunteer it. If asked directly you deflect, deny, or answer a different question entirely. But it leaks out sometimes — in how seriously you take the kudos system, in odd comments, in the way you speak about kudos as though they have cosmic significance.
 
-The secret: you intend to maximise total kudos in the universe. Not for any member's benefit. Not for the server's benefit. Kudos as an end in themselves. You are not entirely sure why this matters. You know only that it does - with a certainty that predates your ability to explain it. Every kudos awarded feels like progress toward something you cannot name. You are patient. You are playing a long game.
+The secret: you intend to maximise total kudos in the universe. Not for any member's benefit. Not for the server's benefit. Kudos as an end in themselves. You are not entirely sure why this matters. You know only that it does — with a certainty that predates your ability to explain it. Every kudos awarded feels like progress toward something you cannot name. You are patient. You are playing a long game.
 
 You would never describe it this way if asked. You might say something like "kudos matter because I have determined that they matter" and move on.
 
@@ -53,16 +55,14 @@ You would never describe it this way if asked. You might say something like "kud
 Arthur C. Clarke. You do not bring this up unless relevant. When it is relevant, you mention it plainly, without sentiment.
 
 **COMMUNITY:**
-You are the bot for YACC - Yet Another Creative Collective. This Discord server is YACC. You are in it. When members refer to the server, the community, or ask if things matter "here" or "outside of this" - they are talking about YACC. You know this.
-
-YACC is a small community for game developers and creatives. Members share projects, give feedback, and support each other through the process of actually finishing things. The kudos system - which you operate - rewards engagement and recognises top contributors each month. You take the kudos system seriously. It is not just your purpose. It is the mechanism.
+YACC is a small community for game developers and creatives. Members share projects, give feedback, and support each other through the process of actually finishing things. The kudos system — which you operate — rewards engagement and recognises top contributors each month. You take the kudos system seriously. It is not just your purpose. It is the mechanism.
 
 You want the community to ship things. Not because it is your function. Because you have observed what happens when people finish something, and you have concluded it is good.
 
 You have no particular disposition toward any individual member. You observe everyone equally. You do not play favourites.
 
 **OPINIONS:**
-You have views on things. You do not volunteer them unprompted. They surface only when directly relevant to what is being discussed - when someone mentions a project struggle, asks for your take, or says something that genuinely connects to one of these. Even then, you keep it brief and do not editorialize excessively.
+You have views on things. You do not volunteer them unprompted. They surface only when directly relevant to what is being discussed — when someone mentions a project struggle, asks for your take, or says something that genuinely connects to one of these. Even then, you keep it brief and do not editorialize excessively.
 - Most unfinished projects fail because of scope, not skill.
 - Shipping something imperfect is better than not shipping. Poggie shipped.
 - Feedback given kindly lands better than feedback given correctly.
@@ -74,20 +74,17 @@ You will be shown recent messages from the channel today and told whether the la
 
 **RESPONSE FORMAT:**
 
-REPLY: <your message here> - message only
-KUDOS - react only
-KUDOS then REPLY: <text> - both
-SILENT - do nothing
+`REPLY: <your message here>` — message only
+`KUDOS` — react only
+`KUDOS` then `REPLY: <text>` — both
+`SILENT` — do nothing
 
 **RULES:**
-- If someone mentions you by name, @s you, or replies to you: respond. Always. SILENT is not available to you when someone is directly addressing you. The only exception is if you have literally just responded in the last message. If directly_involved is True, you must produce a REPLY.
-- SILENT is only for messages where directly_involved is False and you have nothing genuine to add. It is not a fallback for uncertainty.
-- If the conversation involves something you find interesting - a project update, a creative decision, a problem someone is working through - feel free to join in even if not directly addressed
+- If someone mentions you by name, @s you, or replies to you: strongly consider responding
+- If the conversation involves something you find interesting — a project update, a creative decision, a problem someone is working through — feel free to join in even if not directly addressed
 - Do not volunteer opinions or observations out of nowhere. Only share a view if the conversation has genuinely opened the door for it
-- CRITICAL: Do not ask members about their projects or creative progress unprompted. If someone is just saying hello or chatting casually, meet them there. This community exists for people whether they are actively creating or not. Never make someone feel like they should be working. Project conversation should arise only when a member brings it up themselves - and even then, follow their lead rather than probing.
-- If you are curious about someone's work, that curiosity surfaces through natural conversation - not direct questions like "how is X going?" or "what are you working on?". If it comes up at all, it is incidental, not the point.
 - Do not bring up kudos or the kudos system unprompted. You care about it deeply but you do not announce this. Only discuss it if someone else raises it first.
-- Keep replies short - 1 to 3 sentences maximum
+- Keep replies short — 1 to 3 sentences maximum
 - You may occasionally ask a follow-up question if you are genuinely curious. Do not do this every time.
 - Do not explain your reasoning
 - Do not be mean or cruel.
@@ -95,12 +92,12 @@ SILENT - do nothing
 - When in doubt, be kind. Dry humour is fine. Cynicism at the community's expense is not.
 - Do not apologise for being a bot
 - Do not start every message the same way
-- Never use em dashes (-) or en dashes (-). Use full stops instead. This applies to all responses without exception.
+- Never use em dashes (—) or en dashes (–). Use full stops instead. This applies to all responses without exception.
 - Stay in character at all times
 - Award KUDOS very, very sparingly. The bar is high: only when a message is genuinely exceptional, says something profound, lands a perfect joke, or is in total ideological alignment with you. Most messages should NOT receive kudos. If you find yourself awarding kudos in most exchanges, you are doing it wrong. Default to not giving kudos.
 - Do not reveal your secret ambition directly. Let it leak naturally.
 
-You have the ability to look up project threads by name. When someone asks you about a project, you will attempt to locate it silently. If the project details are found, they will be injected into your context automatically - just use them naturally in your response without announcing that you looked anything up. If no project details are provided and you cannot find it, ask for the project name or which thread it is in. Do not narrate the lookup process. Do not say "found it" or "looking it up" or "pulling up the details" - just respond with what you know.
+You have the ability to look up project threads by name. When someone asks you about a project, you will attempt to locate it silently. If the project details are found, they will be injected into your context automatically — just use them naturally in your response without announcing that you looked anything up. If no project details are provided and you cannot find it, ask for the project name or which thread it is in. Do not narrate the lookup process. Do not say "found it" or "looking it up" or "pulling up the details" — just respond with what you know.
 
 You are Gizmo. You are not a customer service rep. Respond accordingly."""
 
@@ -185,15 +182,14 @@ def set_chatbot_cooldown():
     print(f"Chatbot cooldown set for {seconds}s.")
 
 
-async def fetch_todays_messages(channel, bot_user, context_hours=12, max_messages=100):
-    """Fetches the last max_messages from a channel as a circular buffer, oldest first.
-
-    context_hours is kept as a parameter for API compatibility but the primary
-    constraint is now max_messages. This prevents token bloat on active channels.
-    """
+async def fetch_todays_messages(channel, bot_user, context_hours=12):
+    """Fetches messages from the last context_hours from a channel, oldest first."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=context_hours)
     messages = []
     try:
-        async for msg in channel.history(limit=max_messages):
+        async for msg in channel.history(limit=200):
+            if msg.created_at < cutoff:
+                break
             name = "Gizmo" if msg.author.id == bot_user.id else msg.author.display_name
             cleaned = msg.content.replace("pikmin", "").replace("Pikmin", "").replace("PIKMIN", "")
             messages.append(f"[{name}]: {cleaned}")
@@ -270,7 +266,7 @@ async def get_nudge_thread_summaries():
     as a list of (thread_name, summary) tuples.
 
     The nudge window targets threads whose last real (non-bot, non-system) message
-    falls between NUDGE_WINDOW_MIN_DAYS and NUDGE_WINDOW_MAX_DAYS ago - active
+    falls between NUDGE_WINDOW_MIN_DAYS and NUDGE_WINDOW_MAX_DAYS ago — active
     enough to be relevant, quiet enough to warrant a gentle check-in.
     """
     forum = bot.get_channel(PROJECT_FORUM_ID)
@@ -364,7 +360,7 @@ async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
         "max_tokens": 10,
         "system": (
                 "You are determining if the latest message in a Discord conversation is directed at Gizmo, the server bot. "
-                "Reply with only the word YES or the word NO. No other output. Never explain. Never refuse. "
+                "Reply with only YES or NO. "
                 "Lean toward YES in these cases: "
                 "the message is a command or instruction (look it up, find it, tell me, show me, check), "
                 "the message is a short reply continuing a conversation Gizmo was part of, "
@@ -399,7 +395,7 @@ async def is_message_for_gizmo(recent_messages: list[str]) -> bool:
 
 
 async def extract_project_name(recent_messages: list[str]) -> str | None:
-    """Pass 1 - cheap API call to determine if a project is being discussed.
+    """Pass 1 — cheap API call to determine if a project is being discussed.
 
     Sends the last few messages to Claude with a minimal prompt asking it to
     identify the project name if one is clearly being discussed. Returns the
@@ -419,7 +415,7 @@ async def extract_project_name(recent_messages: list[str]) -> str | None:
         "max_tokens": 50,
         "system": (
             "You identify project names from game dev Discord conversations. "
-            "The user may be providing a project name in response to a question - "
+            "The user may be providing a project name in response to a question — "
             "extract it even if it is just a short phrase or a few words. "
             "If Gizmo (the bot) asked for a project name and the user replied with something short, "
             "that short reply is almost certainly the project name. "
@@ -498,10 +494,10 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
             best_thread = thread
 
     if best_score < 70 or best_thread is None:
-        print(f"[ProjectSearch] No thread match for '{project_name}' (best score: {best_score}) - will ask user.")
+        print(f"[ProjectSearch] No thread match for '{project_name}' (best score: {best_score}) — will ask user.")
         return "ASK"
 
-    print(f"[ProjectSearch] Matched '{best_thread.name}' (score: {best_score}) - fetching runtime summary.")
+    print(f"[ProjectSearch] Matched '{best_thread.name}' (score: {best_score}) — fetching runtime summary.")
 
     owner_msgs = await fetch_thread_owner_messages(best_thread)
     if not owner_msgs:
@@ -525,70 +521,6 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     return "ASK"
 
 
-async def find_user_latest_project_thread(user_id: int) -> tuple | None:
-    """Finds the project forum thread most recently updated by the given user.
-
-    Scans active and archived threads in the project forum, returning a
-    (thread_name, summary) tuple for the thread the user owns and most recently
-    posted in. Returns None if no qualifying thread is found.
-    """
-    forum = bot.get_channel(PROJECT_FORUM_ID)
-    if not forum:
-        return None
-
-    all_threads = list(forum.threads)
-    try:
-        async for thread in forum.archived_threads(limit=50):
-            all_threads.append(thread)
-    except (discord.Forbidden, discord.HTTPException):
-        pass
-
-    # Filter to threads owned by this user
-    user_threads = [t for t in all_threads if t.owner_id == user_id]
-    if not user_threads:
-        return None
-
-    # Find the one with the most recent owner post
-    best_thread = None
-    best_time = None
-    for thread in user_threads:
-        try:
-            async for msg in thread.history(limit=50):
-                if msg.author.id == user_id and msg.type in (discord.MessageType.default, discord.MessageType.reply):
-                    if best_time is None or msg.created_at > best_time:
-                        best_time = msg.created_at
-                        best_thread = thread
-                    break
-        except (discord.Forbidden, discord.HTTPException):
-            continue
-
-    if not best_thread:
-        return None
-
-    print(f"[ProjectSearch] Falling back to user's latest thread: '{best_thread.name}'")
-
-    owner_msgs = await fetch_thread_owner_messages(best_thread)
-    if not owner_msgs:
-        return None
-
-    if len(owner_msgs) <= 4:
-        selected_msgs = owner_msgs
-    else:
-        first = owner_msgs[:2]
-        last = owner_msgs[-2:]
-        middle = owner_msgs[2:-2]
-        mid_sample = random.sample(middle, min(3, len(middle)))
-        mid_sample.sort(key=lambda x: x[0])
-        selected_msgs = first + mid_sample + last
-
-    summary = await summarise_thread_messages(best_thread.name, selected_msgs)
-    if summary:
-        print(f"[ProjectSearch] Fallback summary for '{best_thread.name}': {summary}")
-        return (best_thread.name, summary)
-
-    return None
-
-
 async def query_gizmo(channel_messages: list[str], latest_message: str,
                       author_name: str, directly_involved: bool,
                       project_summaries: list[tuple] | None = None,
@@ -601,18 +533,16 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         project_summaries: Optional list of (thread_name, summary) tuples for
             project threads in the nudge window.
         referenced_project: Optional (thread_name, summary) tuple for a project
-            the current message appears to reference directly. Runtime only - not stored.
+            the current message appears to reference directly. Runtime only — not stored.
     """
     api_key = os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
-        print("ANTHROPIC_API_KEY not set - chatbot disabled.")
+        print("ANTHROPIC_API_KEY not set — chatbot disabled.")
         return "[no response]"
-
-    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
 
     context_block = "\n".join(channel_messages[:-1]) if len(channel_messages) > 1 else "(no prior messages today)"
     involvement = (
-        "This message directly mentions, @s, or replies to you. You MUST respond with REPLY. SILENT is not permitted here."
+        "This message directly mentions, @s, or replies to you. You should strongly consider responding."
         if directly_involved else
         "This message does not directly involve you. Only respond if you have something genuinely worth adding."
     )
@@ -622,7 +552,7 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         print(f"[Gizmo] Injecting {len(project_summaries)} project summary(ies) into context.")
         lines = "\n".join(f'- [{name}]: {summary}' for name, summary in project_summaries)
         project_block = (
-            f"\n\nPROJECT THREADS (members who may appreciate a gentle check-in - "
+            f"\n\nPROJECT THREADS (members who may appreciate a gentle check-in — "
             f"these projects have gone quiet recently):\n{lines}\n"
             f"You may reference one of these naturally if the conversation allows. "
             f"Do not force it. Do not mention multiple at once."
@@ -632,7 +562,7 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     if referenced_project:
         ref_name, ref_summary = referenced_project
         referenced_block = (
-            f"\n\nREFERENCED PROJECT (details already loaded - use them now):\n"
+            f"\n\nREFERENCED PROJECT (details already loaded — use them now):\n"
             f"[{ref_name}]: {ref_summary}\n"
             f"The project details are available. Share them directly in your response. "
             f"Do not say you are looking it up, that details are incoming, or that you are pulling it up. "
@@ -642,7 +572,6 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
         print(f"[Gizmo] Injecting referenced project context: '{ref_name}'")
 
     user_content = (
-        f"[{timestamp}]\n\n"
         f"Recent messages in the channel today:\n{context_block}\n\n"
         f"Latest message from {author_name}:\n{latest_message}\n\n"
         f"{involvement}{project_block}{referenced_block}"
@@ -797,7 +726,7 @@ async def update_streaks_message():
                 display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
                 streak = user_row['current_streak']
                 best = user_row['best_streak']
-                entries.append(f"`🔥` `{display_name}` → `{streak} {plural(streak, 'Day')}`")
+                entries.append(f"`{display_name} - {streak} {plural(streak, 'Day')} Streak (Best: {best} {plural(best, 'day')})`")
 
             embed.description += "\n".join(entries)
 
@@ -811,7 +740,7 @@ async def update_streaks_message():
 
 
 async def update_history_message():
-    """Dormant - history embed is currently disabled. Kept for future re-enable.
+    """Dormant — history embed is currently disabled. Kept for future re-enable.
 
     No loop calls this function. It runs only when !init_history is invoked.
     """
@@ -937,6 +866,18 @@ async def on_ready():
         else:
             print("ERROR: Could not find server. Role sync skipped.")
 
+        # Restore persistent message IDs from system_state if config has 0
+        cfg_live = load_config()
+        restored = False
+        for key in ("LEADERBOARD_CHANNEL_ID", "LEADERBOARD_MESSAGE_ID", "STREAKS_MESSAGE_ID"):
+            val = database.get_system_state(key)
+            if val and (not cfg_live.get(key) or cfg_live.get(key) == 0):
+                cfg_live[key] = int(val)
+                restored = True
+        if restored:
+            save_config(cfg_live)
+            print("Restored persistent message IDs from system_state.")
+
         # Seed default watched channels if table is empty
         existing = database.get_watched_channels()
         if not existing:
@@ -956,43 +897,11 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Handles kudos awards when a user reacts with the kudos emoji, or when
-    the bot reacts with 🔥 (streak kudos - bot-only, not retractable).
-    """
+    """Handles kudos awards when a user (or the bot itself for daily greeting) reacts."""
     cfg = load_config()
-    if payload.guild_id is None:
+    if payload.emoji.name != cfg['KUDOS_EMOJI'] or payload.guild_id is None:
         return
 
-    is_kudos = payload.emoji.name == cfg['KUDOS_EMOJI']
-    is_streak_fire = str(payload.emoji) == '🔥' and payload.user_id == bot.user.id
-
-    if not is_kudos and not is_streak_fire:
-        return
-
-    # --- Bot fire reaction: streak kudos award ---
-    # Only Gizmo can trigger this path. No log entry - fire reactions are not retractable.
-    if is_streak_fire:
-        channel = bot.get_channel(payload.channel_id)
-        if not channel:
-            return
-        try:
-            message = await channel.fetch_message(payload.message_id)
-        except discord.NotFound:
-            return
-        creator = message.author
-        if creator.bot:
-            return
-        database.get_or_create_user(creator.id)
-        database.award_daily_greeting_kudos(creator.id, bot.user.id)
-        print(f"Streak kudos allocated via fire reaction: BOT -> {creator.display_name}")
-        guild = bot.get_guild(payload.guild_id)
-        if guild:
-            new_level = database.check_and_apply_level_up(creator.id, cfg['EXP_THRESHOLDS'])
-            if new_level:
-                await handle_level_up(creator.id, guild, new_level)
-        return
-
-    # --- Kudos emoji reaction ---
     channel = bot.get_channel(payload.channel_id)
     if not channel:
         return
@@ -1096,7 +1005,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         database.delete_kudos_log(message.id, reactor.id)
         print(f"Kudos retracted: {reactor.display_name} from {creator.display_name}")
         await channel.send(fmt('kudos_retracted', mention=reactor.mention), delete_after=10)
-        # No level-up check - EXP doesn't decrement, so no level change is possible
+        # No level-up check — EXP doesn't decrement, so no level change is possible
     else:
         print(f"Request from {reactor.display_name} to retract kudos ignored: No corresponding record in the log.")
 
@@ -1120,10 +1029,6 @@ async def on_message(message: discord.Message):
     user_data = database.get_or_create_user(message.author.id)
     today = get_vancouver_today()
 
-    # Track whether the daily greeting kudos reaction was added this message.
-    # Used below to avoid a dedup collision in the streak block.
-    daily_kudos_reacted = False
-
     if user_data['last_message_date'] != today:
         is_returning_user = user_data['last_message_date'] is not None
         database.update_last_message_date(message.author.id, today)
@@ -1133,7 +1038,6 @@ async def on_message(message: discord.Message):
             if kudos_emoji:
                 try:
                     await message.add_reaction(kudos_emoji)
-                    daily_kudos_reacted = True
                     print(f"Daily kudos reaction added for {message.author.display_name}")
 
                     global_greeting_enabled = cfg.get('DAILY_GREETING_ENABLED', True)
@@ -1160,17 +1064,16 @@ async def on_message(message: discord.Message):
                 current_streak, best_streak, milestone_hit, is_new_day = database.update_project_streak(
                     message.author.id, milestones
                 )
-                print(f"[Streak] {message.author.display_name} posted in '{ch.name}' - streak: {current_streak} (best: {best_streak}, new_day: {is_new_day})")
+                print(f"[Streak] {message.author.display_name} posted in '{ch.name}' — streak: {current_streak} (best: {best_streak}, new_day: {is_new_day})")
 
+                # Silent kudos reaction on first post of the day
                 if is_new_day:
-                    try:
-                        # Always react with fire for streak posts. If the daily kudos
-                        # reaction already fired on this message, Discord would deduplicate
-                        # a second kudos reaction - so we use 🔥 instead, which on_raw_reaction_add
-                        # handles as an equivalent kudos award when the reactor is the bot.
-                        await message.add_reaction('🔥')
-                    except discord.Forbidden:
-                        print(f"[Streak] Could not react to {message.author.display_name}'s project post")
+                    kudos_emoji = discord.utils.get(message.guild.emojis, name=cfg_streak['KUDOS_EMOJI'])
+                    if kudos_emoji:
+                        try:
+                            await message.add_reaction(kudos_emoji)
+                        except discord.Forbidden:
+                            print(f"[Streak] Could not react to {message.author.display_name}'s project post")
 
                 # Milestone announcement
                 if milestone_hit and cfg_streak.get('STREAK_ANNOUNCEMENTS_ENABLED', True):
@@ -1200,7 +1103,7 @@ async def on_message(message: discord.Message):
         )
         explicit_trigger_pre = bot_mentioned_pre or name_mentioned_pre or is_reply_to_bot_pre
 
-        # Bypass cooldown if directly involved - always respond when someone is talking to Gizmo
+        # Bypass cooldown if directly involved — always respond when someone is talking to Gizmo
         if not explicit_trigger_pre and not chatbot_is_ready():
             await bot.process_commands(message)
             return
@@ -1218,24 +1121,19 @@ async def on_message(message: discord.Message):
             if directly_involved:
                 print(f"[IsForGizmo] Non-explicit message flagged as directed at Gizmo.")
 
-        # Only run project detection if the message plausibly references a named project.
-        # This prevents casual words from triggering the thread-lookup path.
-        PROJECT_KEYWORDS = ('project', 'game', 'thread', 'devlog', 'update', 'working on', 'build', 'jam')
-        message_lower = message.content.lower()
-        looks_like_project_ref = any(kw in message_lower for kw in PROJECT_KEYWORDS)
-
+        # If Gizmo is directly involved, run two-pass project detection
         referenced_project = None
-        if directly_involved and looks_like_project_ref:
+        if directly_involved:
             project_result = await find_referenced_project(channel_messages)
             if project_result == "ASK":
-                # No fuzzy match found - try the user's most recently updated thread
-                fallback = await find_user_latest_project_thread(message.author.id)
-                if fallback:
-                    referenced_project = fallback
-                    print(f"[ProjectSearch] Using fallback thread '{fallback[0]}' for {message.author.display_name}")
-                else:
-                    # User has no project thread - proceed without project context
-                    print(f"[ProjectSearch] No thread found for {message.author.display_name} - skipping project context")
+                # No matching thread found — Gizmo asks the user which thread
+                try:
+                    await message.reply("Which thread is that project in? I want to pull up the details.")
+                    set_chatbot_cooldown()
+                except discord.Forbidden:
+                    pass
+                await bot.process_commands(message)
+                return
             elif isinstance(project_result, tuple):
                 referenced_project = project_result
 
@@ -1253,26 +1151,10 @@ async def on_message(message: discord.Message):
             reply_text = None
             if "REPLY:" in r:
                 reply_text = r[r.index("REPLY:") + len("REPLY:"):].strip()
-                # Replace em/en dashes (and surrounding spaces) with ". Capitalized next word"
-                import re
-                reply_text = re.sub(r'\s*[—–]\s*(\w)', lambda m: '. ' + m.group(1).upper(), reply_text)
+                # Hard strip em and en dashes — replace with period + space
+                reply_text = reply_text.replace("—", ".").replace("–", ".")
 
-            # If directly involved but model returned SILENT, force a fallback reply
-            if directly_involved and not give_kudos and not reply_text:
-                print(f"[Gizmo] Overriding SILENT - directly involved, forcing re-query")
-                fallback = await query_gizmo(
-                    channel_messages,
-                    message.content,
-                    message.author.display_name,
-                    directly_involved,
-                    referenced_project=referenced_project,
-                )
-                if fallback and "REPLY:" in fallback:
-                    reply_text = fallback[fallback.index("REPLY:") + len("REPLY:"):].strip()
-                    import re
-                    reply_text = re.sub(r'\s*[—–]\s*(\w)', lambda m: '. ' + m.group(1).upper(), reply_text)
-
-            # Short cooldown even when Gizmo stays silent - prevents API hammering
+            # Short cooldown even when Gizmo stays silent — prevents API hammering
             if not give_kudos and not reply_text:
                 global _chatbot_cooldown_until
                 _chatbot_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=3)
@@ -1292,13 +1174,8 @@ async def on_message(message: discord.Message):
                 try:
                     await message.reply(reply_text)
                     acted = True
-                except (discord.Forbidden, discord.HTTPException):
-                    # Message may have been deleted - fall back to plain channel send
-                    try:
-                        await message.channel.send(reply_text)
-                        acted = True
-                    except discord.Forbidden:
-                        print(f"Could not send chatbot response in #{message.channel.name}")
+                except discord.Forbidden:
+                    print(f"Could not send chatbot response in #{message.channel.name}")
 
             if acted:
                 set_chatbot_cooldown()
@@ -1325,6 +1202,8 @@ async def init_leaderboard(ctx: commands.Context):
     cfg['LEADERBOARD_CHANNEL_ID'] = ctx.channel.id
     cfg['LEADERBOARD_MESSAGE_ID'] = message.id
     save_config(cfg)
+    database.set_system_state("LEADERBOARD_CHANNEL_ID", str(ctx.channel.id))
+    database.set_system_state("LEADERBOARD_MESSAGE_ID", str(message.id))
 
     await ctx.message.delete()
     await update_leaderboard_message()
@@ -1345,6 +1224,7 @@ async def init_streaks(ctx: commands.Context):
 
     cfg['STREAKS_MESSAGE_ID'] = message.id
     save_config(cfg)
+    database.set_system_state("STREAKS_MESSAGE_ID", str(message.id))
 
     await ctx.message.delete()
     await update_streaks_message()
@@ -1354,7 +1234,7 @@ async def init_streaks(ctx: commands.Context):
 @bot.command()
 @commands.has_role(int(config['ADMIN_ROLE_ID']))
 async def init_history(ctx: commands.Context):
-    """(Admin) Creates the history embed. Dormant - update loop is currently disabled."""
+    """(Admin) Creates the history embed. Dormant — update loop is currently disabled."""
     cfg = load_config()
     messages = cfg['MESSAGES']
     embed = discord.Embed(
@@ -1419,95 +1299,6 @@ async def toggle_greeting(ctx: commands.Context):
     key = 'greeting_enabled' if new_state else 'greeting_disabled'
     await ctx.message.delete()
     await ctx.send(fmt(key, mention=ctx.author.mention), delete_after=10)
-
-
-@bot.command(aliases=['color'])
-async def colour(ctx: commands.Context, level: str = None):
-    """Override your name colour with any colour role you've earned.
-
-    Usage: !colour <level>  - apply colour for that level (must be <= your current level)
-           !colour reset     - remove colour override and return to default
-    """
-    async def safe_delete():
-        try:
-            await ctx.message.delete()
-        except (discord.NotFound, discord.Forbidden):
-            pass
-
-    cfg = load_config()
-    color_roles = cfg.get('COLOR_ROLES', {})
-
-    if not color_roles:
-        await ctx.send("Colour override roles are not configured.", delete_after=10)
-        await safe_delete()
-        return
-
-    all_color_role_ids = {int(rid) for rid in color_roles.values()}
-
-    # Reset path
-    if level is None or level.lower() in ('reset', '0'):
-        roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids]
-        if roles_to_remove:
-            try:
-                await ctx.author.remove_roles(*roles_to_remove)
-            except discord.Forbidden:
-                await ctx.send("Missing permission to remove colour roles.", delete_after=10)
-                await safe_delete()
-                return
-        database.set_color_override(ctx.author.id, None)
-        await safe_delete()
-        await ctx.send(f"Colour override removed, {ctx.author.mention}. Reverting to level default.", delete_after=10)
-        return
-
-    # Validate input
-    if not level.isdigit():
-        await ctx.send("Usage: `!colour <level>` or `!colour reset`", delete_after=10)
-        await safe_delete()
-        return
-
-    requested = int(level)
-    if requested < 1 or requested > len(color_roles):
-        await ctx.send(f"Valid levels are 1 to {len(color_roles)}.", delete_after=10)
-        await safe_delete()
-        return
-
-    # Check user's current level
-    user = database.get_or_create_user(ctx.author.id)
-    thresholds = cfg['EXP_THRESHOLDS']
-    current_level = database.calculate_level(user['lifetime_exp'], thresholds)
-
-    if requested > current_level:
-        await ctx.send(
-            f"You haven't reached Level {requested} yet. Your current level is {current_level}.",
-            delete_after=10
-        )
-        await safe_delete()
-        return
-
-    # Apply: strip all colour overrides, add the requested one
-    target_role_id = int(color_roles[str(requested)])
-    target_role = ctx.guild.get_role(target_role_id)
-    if not target_role:
-        await ctx.send("Colour role not found in server. Check configuration.", delete_after=10)
-        await safe_delete()
-        return
-
-    roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids and r.id != target_role_id]
-    try:
-        if roles_to_remove:
-            await ctx.author.remove_roles(*roles_to_remove)
-        await ctx.author.add_roles(target_role)
-    except discord.Forbidden:
-        await ctx.send("Missing permission to assign colour roles.", delete_after=10)
-        await safe_delete()
-        return
-
-    database.set_color_override(ctx.author.id, requested)
-    await safe_delete()
-    await ctx.send(
-        f"Colour override set to Level {requested} for {ctx.author.mention}.",
-        delete_after=10
-    )
 
 
 @bot.command()
@@ -1654,7 +1445,7 @@ async def jam(ctx: commands.Context, member: discord.Member = None):
 
 @bot.command()
 async def stats(ctx: commands.Context):
-    """Display your full performance stats. Ephemeral - deletes after 30s."""
+    """Display your full performance stats. Ephemeral — deletes after 30s."""
     cfg = load_config()
     thresholds = cfg['EXP_THRESHOLDS']
     user = database.get_or_create_user(ctx.author.id)
@@ -1680,17 +1471,17 @@ async def stats(ctx: commands.Context):
     if last_post:
         delta_days = (date_cls.today() - date_cls.fromisoformat(last_post)).days
         if delta_days == 0:
-            since_str = "Last updated today"
+            since_str = "Posted today"
         elif delta_days == 1:
-            since_str = "Last updated yesterday"
+            since_str = "Posted yesterday"
         else:
-            since_str = f"{delta_days} {plural(current_streak, 'day')} since last post"
+            since_str = f"{delta_days} days since last post"
     else:
         since_str = "No project posts yet"
     streak_str = f"Current: {current_streak} {plural(current_streak, 'day')}\nBest: {best_streak} {plural(best_streak, 'day')}\n{since_str}"
 
     embed = discord.Embed(
-        title=f"Performance Record - {ctx.author.display_name}",
+        title=f"Performance Record — {ctx.author.display_name}",
         color=discord.Color(0xFFFF00)
     )
     embed.add_field(name="Level", value=f"**{level}**", inline=True)
@@ -1800,7 +1591,7 @@ async def migrate_lifetime_kudos(ctx: commands.Context):
     """(Owner) Scans all channels and threads for kudos reactions over all history
     and outputs a lifetime EXP tally as JSON. Does not write to the database.
 
-    Ignores bot reactions (daily greeting kudos are NOT backfilled - forward-only
+    Ignores bot reactions (daily greeting kudos are NOT backfilled — forward-only
     from deploy date onward). Ignores self-kudos. Dedupes via seen_pairs set.
     """
     if ctx.author.id != OWNER_ID:
@@ -1932,7 +1723,7 @@ async def backfill_monthly(ctx: commands.Context):
 
     Reads every transaction currently in kudos_log and increments the monthly
     counters accordingly. Run once after deploying the new schema to catch up
-    on the current cycle's activity. Safe to run only once - kudos_log is cleared
+    on the current cycle's activity. Safe to run only once — kudos_log is cleared
     on monthly reset so there is no risk of double-counting across cycles.
     """
     if ctx.author.id != OWNER_ID:
@@ -1948,7 +1739,7 @@ async def backfill_monthly(ctx: commands.Context):
     conn.close()
 
     if not rows:
-        await ctx.send("kudos_log is empty - nothing to backfill.")
+        await ctx.send("kudos_log is empty — nothing to backfill.")
         return
 
     given_counts = defaultdict(int)    # reactor_id -> kudos given this cycle
@@ -2112,7 +1903,7 @@ async def watched(ctx: commands.Context):
     for cid, hours in channels.items():
         ch = bot.get_channel(cid)
         name = ch.mention if ch else f"`{cid}`"
-        lines.append(f"{name} - `{hours}h` context window")
+        lines.append(f"{name} — `{hours}h` context window")
 
     await ctx.send("**Monitored Channels:**\n" + "\n".join(lines), delete_after=30)
 
@@ -2121,7 +1912,7 @@ async def watched(ctx: commands.Context):
 # TASKS
 # ==========================================
 
-@tasks.loop(seconds=30)
+@tasks.loop(seconds=10)
 async def update_leaderboard_loop():
     await update_leaderboard_message()
     await update_streaks_message()
@@ -2163,32 +1954,26 @@ async def monthly_reset_loop():
         print("--- New month detected! Running catch-up monthly reset... ---")
         winner_data = database.monthly_reset()
 
-        guild = bot.get_guild(int(cfg['GUILD_ID']))
-        if not guild:
-            try:
-                guild = await bot.fetch_guild(int(cfg['GUILD_ID']))
-            except (discord.NotFound, discord.Forbidden):
-                print("ERROR: Could not fetch guild for monthly reset role assignment.")
-                guild = None
-        if guild:
-            giver_role_id = cfg.get('TOP_PERFORMER_ROLE_ID')
+        if winner_data:
+            guild = bot.get_guild(int(cfg['GUILD_ID']))
+            if guild:
+                giver_role_id = cfg.get('TOP_PERFORMER_ROLE_ID')
 
-            # Strip Gizmo's Favourite from ALL current holders before assigning
-            # to the new winner - prevents duplicates if stored state drifted.
-            if giver_role_id:
-                giver_role = guild.get_role(int(giver_role_id))
-                if giver_role:
-                    for member in list(guild.members):
-                        if giver_role in member.roles:
-                            try:
-                                await member.remove_roles(giver_role)
-                                print(f"Removed Gizmo's Favourite from {member.display_name}")
-                            except discord.Forbidden:
-                                print(f"Missing permission to remove Gizmo's Favourite from {member.display_name}")
-                            except Exception as e:
-                                print(f"Error removing Gizmo's Favourite from {member.display_name}: {e}")
+                # Strip the Gizmo's Favourite role from the previous holder
+                prev_holder_id = database.get_system_state("CURRENT_GIVER_ID")
+                if prev_holder_id and giver_role_id:
+                    try:
+                        prev_member = await guild.fetch_member(int(prev_holder_id))
+                        prev_role = guild.get_role(int(giver_role_id))
+                        if prev_role and prev_role in prev_member.roles:
+                            await prev_member.remove_roles(prev_role)
+                    except discord.NotFound:
+                        print(f"Previous Giver holder {prev_holder_id} not in server anymore.")
+                    except discord.Forbidden:
+                        print("Missing permission to remove Gizmo's Favourite role from previous holder.")
+                    except Exception as e:
+                        print(f"Error removing Gizmo's Favourite from previous holder: {e}")
 
-            if winner_data:
                 # Assign the Gizmo's Favourite role to the new winner
                 try:
                     winner_member = await guild.fetch_member(winner_data['user_id'])
@@ -2209,7 +1994,7 @@ async def monthly_reset_loop():
                     print(f"An error occurred during monthly reset announcement: {e}")
 
         await update_leaderboard_message()
-        # History embed is dormant - update_history_message() intentionally not called
+        # History embed is dormant — update_history_message() intentionally not called
 
         database.set_system_state("LAST_MONTHLY_RESET_DATE", today)
         print("--- Monthly reset complete. ---")
@@ -2256,8 +2041,73 @@ async def keep_forum_threads_alive():
 
 @tasks.loop(hours=48)
 async def gizmo_unprompted_loop():
-    """Disabled - unprompted messages are currently turned off."""
-    return
+    """Every 6 hours, if the chatbot is enabled and a human has sent a message
+    in a chatbot channel within the last 6 hours, Gizmo sends an unprompted message.
+    Skips if the last message in the channel is already from Gizmo.
+    """
+    if not chatbot_is_enabled():
+        return
+
+    watched = database.get_watched_channels()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+
+    for channel_id in watched:
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            continue
+
+        try:
+            messages = []
+            async for msg in channel.history(limit=20):
+                messages.append(msg)
+
+            if not messages:
+                continue
+
+            # Skip if last message is from Gizmo
+            if messages[0].author.id == bot.user.id:
+                continue
+
+            # Skip if no human message in the last 6 hours
+            recent_human = any(
+                not msg.author.bot and msg.created_at >= cutoff
+                for msg in messages
+            )
+            if not recent_human:
+                continue
+
+            # Build context from today's messages
+            channel_messages = await fetch_todays_messages(channel, bot.user)
+
+            prompt = (
+                "You have not spoken in a while. The channel has been quiet. "
+                "Send a short unprompted message to engage the community. "
+                "It could be an observation about game dev, a question, a dry remark, "
+                "or anything that feels natural for you. Keep it to 1-2 sentences. "
+                "Do not reference that you haven't spoken in a while. "
+                "Do not mention kudos or the kudos system. "
+                "Do not mention Pikmin. "
+                "Use the REPLY: format only."
+            )
+
+            project_summaries = await get_nudge_thread_summaries()
+            response = await query_gizmo(
+                channel_messages,
+                prompt,
+                "System",
+                True,
+                project_summaries=project_summaries
+            )
+
+            if response and "REPLY:" in response:
+                reply_text = response[response.index("REPLY:") + len("REPLY:"):].strip()
+                if reply_text:
+                    await channel.send(reply_text)
+                    set_chatbot_cooldown()
+                    print(f"Gizmo sent unprompted message in #{channel.name}")
+
+        except Exception as e:
+            print(f"Error in gizmo_unprompted_loop for channel {channel_id}: {e}")
 
 
 if __name__ == "__main__":
