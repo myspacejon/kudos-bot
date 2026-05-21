@@ -141,6 +141,7 @@ def setup_database():
         "ALTER TABLE users ADD COLUMN current_streak INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN best_streak INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN last_project_post_date TEXT",
+        "ALTER TABLE users ADD COLUMN color_override INTEGER DEFAULT NULL",
     ]
     for migration in migrations:
         try:
@@ -466,6 +467,17 @@ def set_thread_summary(thread_id, thread_name, summary):
     conn.execute(
         'INSERT OR REPLACE INTO thread_summaries (thread_id, thread_name, summary, updated_at) VALUES (?, ?, ?, ?)',
         (thread_id, thread_name, summary, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_color_override(user_id, level):
+    """Stores the user's chosen colour override level. Pass None to clear."""
+    conn = get_db_connection()
+    conn.execute(
+        'UPDATE users SET color_override = ? WHERE user_id = ?',
+        (level, user_id)
     )
     conn.commit()
     conn.close()
