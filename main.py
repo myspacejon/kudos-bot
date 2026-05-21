@@ -521,6 +521,70 @@ async def find_referenced_project(recent_messages: list[str]) -> tuple | None | 
     return "ASK"
 
 
+async def find_user_latest_project_thread(user_id: int) -> tuple | None:
+    """Finds the project forum thread most recently updated by the given user.
+
+    Scans active and archived threads in the project forum, returning a
+    (thread_name, summary) tuple for the thread the user owns and most recently
+    posted in. Returns None if no qualifying thread is found.
+    """
+    forum = bot.get_channel(PROJECT_FORUM_ID)
+    if not forum:
+        return None
+
+    all_threads = list(forum.threads)
+    try:
+        async for thread in forum.archived_threads(limit=50):
+            all_threads.append(thread)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    # Filter to threads owned by this user
+    user_threads = [t for t in all_threads if t.owner_id == user_id]
+    if not user_threads:
+        return None
+
+    # Find the one with the most recent owner post
+    best_thread = None
+    best_time = None
+    for thread in user_threads:
+        try:
+            async for msg in thread.history(limit=50):
+                if msg.author.id == user_id and msg.type in (discord.MessageType.default, discord.MessageType.reply):
+                    if best_time is None or msg.created_at > best_time:
+                        best_time = msg.created_at
+                        best_thread = thread
+                    break
+        except (discord.Forbidden, discord.HTTPException):
+            continue
+
+    if not best_thread:
+        return None
+
+    print(f"[ProjectSearch] Falling back to user's latest thread: '{best_thread.name}'")
+
+    owner_msgs = await fetch_thread_owner_messages(best_thread)
+    if not owner_msgs:
+        return None
+
+    if len(owner_msgs) <= 4:
+        selected_msgs = owner_msgs
+    else:
+        first = owner_msgs[:2]
+        last = owner_msgs[-2:]
+        middle = owner_msgs[2:-2]
+        mid_sample = random.sample(middle, min(3, len(middle)))
+        mid_sample.sort(key=lambda x: x[0])
+        selected_msgs = first + mid_sample + last
+
+    summary = await summarise_thread_messages(best_thread.name, selected_msgs)
+    if summary:
+        print(f"[ProjectSearch] Fallback summary for '{best_thread.name}': {summary}")
+        return (best_thread.name, summary)
+
+    return None
+
+
 async def query_gizmo(channel_messages: list[str], latest_message: str,
                       author_name: str, directly_involved: bool,
                       project_summaries: list[tuple] | None = None,
@@ -605,7 +669,6 @@ async def query_gizmo(channel_messages: list[str], latest_message: str,
     except Exception as e:
         print(f"Error calling Claude API: {e}")
         return "[no response]"
-
 
 
 async def handle_level_up(user_id, guild, new_level):
@@ -726,7 +789,7 @@ async def update_streaks_message():
                 display_name = member.display_name if member else f"User ID: {user_row['user_id']}"
                 streak = user_row['current_streak']
                 best = user_row['best_streak']
-                entries.append(f"`🔥` `{display_name}` → `{streak} {plural(streak, 'Day')}`")
+                entries.append(f"`{display_name} - {streak} {plural(streak, 'Day')} Streak (Best: {best} {plural(best, 'day')})`")
 
             embed.description += "\n".join(entries)
 
@@ -897,9 +960,15 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Handles kudos awards when a user (or the bot itself for daily greeting) reacts."""
+    """Handles kudos awards when a user (or the bot itself for daily greeting/streak) reacts."""
     cfg = load_config()
-    if payload.emoji.name != cfg['KUDOS_EMOJI'] or payload.guild_id is None:
+    if payload.guild_id is None:
+        return
+
+    is_kudos = payload.emoji.name == cfg['KUDOS_EMOJI']
+    is_streak_fire = str(payload.emoji) == '🔥' and payload.user_id == bot.user.id
+
+    if not is_kudos and not is_streak_fire:
         return
 
     channel = bot.get_channel(payload.channel_id)
@@ -925,6 +994,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if creator.bot:
         return
 
+    # --- Bot fire reaction: streak kudos award ---
+    # Only Gizmo can trigger this path. No log entry - fire reactions are not retractable.
+    if is_streak_fire:
+        database.get_or_create_user(creator.id)
+        database.award_daily_greeting_kudos(creator.id, bot.user.id)
+        print(f"Streak kudos allocated via fire reaction: BOT -> {creator.display_name}")
+        guild = bot.get_guild(payload.guild_id)
+        if guild:
+            new_level = database.check_and_apply_level_up(creator.id, cfg['EXP_THRESHOLDS'])
+            if new_level:
+                await handle_level_up(creator.id, guild, new_level)
+        return
+
+    # --- Kudos emoji reaction ---
     # Bot reacting to a human message → daily greeting kudos
     if payload.user_id == bot.user.id:
         database.get_or_create_user(creator.id)
@@ -1068,12 +1151,14 @@ async def on_message(message: discord.Message):
 
                 # Silent kudos reaction on first post of the day
                 if is_new_day:
-                    kudos_emoji = discord.utils.get(message.guild.emojis, name=cfg_streak['KUDOS_EMOJI'])
-                    if kudos_emoji:
-                        try:
-                            await message.add_reaction(kudos_emoji)
-                        except discord.Forbidden:
-                            print(f"[Streak] Could not react to {message.author.display_name}'s project post")
+                    try:
+                        # Always react with fire for streak posts. If the daily kudos
+                        # reaction already fired on this message, Discord would deduplicate
+                        # a second kudos reaction - so we use 🔥 instead, which on_raw_reaction_add
+                        # handles as an equivalent kudos award when the reactor is the bot.
+                        await message.add_reaction('🔥')
+                    except discord.Forbidden:
+                        print(f"[Streak] Could not react to {message.author.display_name}'s project post")
 
                 # Milestone announcement
                 if milestone_hit and cfg_streak.get('STREAK_ANNOUNCEMENTS_ENABLED', True):
@@ -1105,9 +1190,8 @@ async def on_message(message: discord.Message):
 
         # Bypass cooldown if directly involved - always respond when someone is talking to Gizmo
         if not explicit_trigger_pre and not chatbot_is_ready():
-            await bot.process_commands(message)
             return
-    if chatbot_is_enabled() and message.channel.id in watched:
+
         # Determine if Gizmo is directly involved
         explicit_trigger = explicit_trigger_pre
 
@@ -1126,14 +1210,14 @@ async def on_message(message: discord.Message):
         if directly_involved:
             project_result = await find_referenced_project(channel_messages)
             if project_result == "ASK":
-                # No matching thread found - Gizmo asks the user which thread
-                try:
-                    await message.reply("Which thread is that project in? I want to pull up the details.")
-                    set_chatbot_cooldown()
-                except discord.Forbidden:
-                    pass
-                await bot.process_commands(message)
-                return
+                # No fuzzy match found - try the user's most recently updated thread
+                fallback = await find_user_latest_project_thread(message.author.id)
+                if fallback:
+                    referenced_project = fallback
+                    print(f"[ProjectSearch] Using fallback thread '{fallback[0]}' for {message.author.display_name}")
+                else:
+                    # User has no project thread - proceed without project context
+                    print(f"[ProjectSearch] No thread found for {message.author.display_name} - skipping project context")
             elif isinstance(project_result, tuple):
                 referenced_project = project_result
 
@@ -1299,6 +1383,95 @@ async def toggle_greeting(ctx: commands.Context):
     key = 'greeting_enabled' if new_state else 'greeting_disabled'
     await ctx.message.delete()
     await ctx.send(fmt(key, mention=ctx.author.mention), delete_after=10)
+
+
+@bot.command(aliases=['color'])
+async def colour(ctx: commands.Context, level: str = None):
+    """Override your name colour with any colour role you've earned.
+
+    Usage: !colour <level>  - apply colour for that level (must be <= your current level)
+           !colour reset     - remove colour override and return to default
+    """
+    async def safe_delete():
+        try:
+            await ctx.message.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
+
+    cfg = load_config()
+    color_roles = cfg.get('COLOR_ROLES', {})
+
+    if not color_roles:
+        await ctx.send("Colour override roles are not configured.", delete_after=10)
+        await safe_delete()
+        return
+
+    all_color_role_ids = {int(rid) for rid in color_roles.values()}
+
+    # Reset path
+    if level is None or level.lower() in ('reset', '0'):
+        roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids]
+        if roles_to_remove:
+            try:
+                await ctx.author.remove_roles(*roles_to_remove)
+            except discord.Forbidden:
+                await ctx.send("Missing permission to remove colour roles.", delete_after=10)
+                await safe_delete()
+                return
+        database.set_color_override(ctx.author.id, None)
+        await safe_delete()
+        await ctx.send(f"Colour override removed, {ctx.author.mention}. Reverting to level default.", delete_after=10)
+        return
+
+    # Validate input
+    if not level.isdigit():
+        await ctx.send("Usage: `!colour <level>` or `!colour reset`", delete_after=10)
+        await safe_delete()
+        return
+
+    requested = int(level)
+    if requested < 1 or requested > len(color_roles):
+        await ctx.send(f"Valid levels are 1 to {len(color_roles)}.", delete_after=10)
+        await safe_delete()
+        return
+
+    # Check user's current level
+    user = database.get_or_create_user(ctx.author.id)
+    thresholds = cfg['EXP_THRESHOLDS']
+    current_level = database.calculate_level(user['lifetime_exp'], thresholds)
+
+    if requested > current_level:
+        await ctx.send(
+            f"You haven't reached Level {requested} yet. Your current level is {current_level}.",
+            delete_after=10
+        )
+        await safe_delete()
+        return
+
+    # Apply: strip all colour overrides, add the requested one
+    target_role_id = int(color_roles[str(requested)])
+    target_role = ctx.guild.get_role(target_role_id)
+    if not target_role:
+        await ctx.send("Colour role not found in server. Check configuration.", delete_after=10)
+        await safe_delete()
+        return
+
+    roles_to_remove = [r for r in ctx.author.roles if r.id in all_color_role_ids and r.id != target_role_id]
+    try:
+        if roles_to_remove:
+            await ctx.author.remove_roles(*roles_to_remove)
+        await ctx.author.add_roles(target_role)
+    except discord.Forbidden:
+        await ctx.send("Missing permission to assign colour roles.", delete_after=10)
+        await safe_delete()
+        return
+
+    database.set_color_override(ctx.author.id, requested)
+    await safe_delete()
+    await ctx.send(
+        f"Colour override set to Level {requested} for {ctx.author.mention}.",
+        delete_after=10
+    )
 
 
 @bot.command()
