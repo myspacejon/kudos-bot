@@ -2085,7 +2085,7 @@ async def watched(ctx: commands.Context):
 # TASKS
 # ==========================================
 
-@tasks.loop(seconds=10)
+@tasks.loop(seconds=60)
 async def update_leaderboard_loop():
     await update_leaderboard_message()
     await update_streaks_message()
